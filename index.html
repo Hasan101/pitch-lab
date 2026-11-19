@@ -1,0 +1,755 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body><title>Pitch Lab</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: one stage card per mode, a segmented mode switch above, live pitch trail as the hero of every mode. Single committed "night stage" look. */
+:root{
+  color-scheme:dark;
+  --bg:#141a2c; --panel:#1d2440; --panel2:#252e50; --line:#323c63; --fg:#eef0fa; --muted:#9aa3c4;
+  --coral:#ff8a65; --sky:#79d0ff; --good:#5fd39a; --warn:#ffc857; --bad:#ff6b7a;
+  --display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --body:"Inter",ui-sans-serif,system-ui,-apple-system,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{background:var(--bg);color:var(--fg)}
+body{font-family:var(--body);font-size:15px;line-height:1.5;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 40px}
+.wrap{max-width:880px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{font-family:var(--display);font-weight:800;font-size:clamp(28px,6vw,40px);line-height:1;margin:0;letter-spacing:-.02em}
+h1 span{color:var(--coral)}
+.sub{color:var(--muted);margin:6px 0 0;font-size:14px}
+h2{font-family:var(--display);font-weight:600;font-size:22px;margin:0;text-wrap:balance}
+h3{font-family:var(--display);font-weight:600;font-size:17px;margin:0}
+p{margin:0}
+.muted{color:var(--muted)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;background:var(--panel);padding:4px;border-radius:14px;border:1px solid var(--line)}
+.tabs button{appearance:none;border:0;background:transparent;color:var(--muted);font:600 13px var(--body);padding:10px 6px;border-radius:10px;cursor:pointer;min-width:0}
+.tabs button[aria-selected="true"]{background:var(--panel2);color:var(--fg);box-shadow:inset 0 0 0 1px var(--line)}
+.tabs button:focus-visible,.btn:focus-visible,.chip:focus-visible{outline:2px solid var(--sky);outline-offset:2px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.between{justify-content:space-between}
+.btn{appearance:none;border:0;border-radius:999px;padding:11px 20px;font:600 15px var(--body);cursor:pointer;background:var(--coral);color:#2a1208}
+.btn.ghost{background:transparent;color:var(--fg);box-shadow:inset 0 0 0 1.5px var(--line)}
+.btn.sky{background:var(--sky);color:#06263a}
+.btn:disabled{opacity:.45;cursor:default}
+.chip{appearance:none;border:0;background:var(--panel2);color:var(--fg);border-radius:999px;padding:7px 13px;font:500 13px var(--body);cursor:pointer;box-shadow:inset 0 0 0 1px var(--line)}
+.chip[aria-pressed="true"]{background:var(--sky);color:#06263a;box-shadow:none}
+.trail{width:100%;height:220px;display:block;border-radius:12px;background:var(--bg)}
+.tall{height:260px}
+.micbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 12px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--muted);flex:none}
+.dot.on{background:var(--good);box-shadow:0 0 0 4px color-mix(in srgb,var(--good) 25%,transparent)}
+.level{flex:1;min-width:80px;height:6px;border-radius:3px;background:var(--panel2);overflow:hidden}
+.level i{display:block;height:100%;width:0;background:var(--sky);transition:width .08s}
+.notice{background:color-mix(in srgb,var(--warn) 12%,var(--panel));border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));border-radius:14px;padding:12px 14px;font-size:14px}
+/* tuner */
+.tuner{display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:center}
+.bignote{font-family:var(--display);font-weight:800;font-size:clamp(64px,16vw,104px);line-height:.9;min-width:2.6ch;letter-spacing:-.03em}
+.bignote small{font-size:.38em;color:var(--muted);font-weight:600;letter-spacing:0}
+.meter{position:relative;height:46px;border-radius:10px;background:linear-gradient(90deg,color-mix(in srgb,var(--bad) 25%,var(--panel2)),var(--panel2) 35%,color-mix(in srgb,var(--good) 30%,var(--panel2)) 50%,var(--panel2) 65%,color-mix(in srgb,var(--bad) 25%,var(--panel2)))}
+.meter .tick{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}
+.meter .center{position:absolute;left:50%;top:-4px;bottom:-4px;width:2px;background:var(--good);transform:translateX(-1px)}
+.needle{position:absolute;top:6px;bottom:6px;width:6px;border-radius:3px;background:var(--fg);left:50%;transform:translateX(-3px);transition:left .09s linear,background .2s}
+.scale{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px}
+.readout{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px;font-size:13px;color:var(--muted)}
+.readout b{color:var(--fg);font-family:var(--mono);font-weight:500}
+/* game */
+.stage{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center}
+.target{font-family:var(--display);font-weight:800;font-size:56px;line-height:1}
+.phase{font:600 12px var(--body);text-transform:uppercase;letter-spacing:.12em;color:var(--sky)}
+.phase.sing{color:var(--coral)}
+.timer{height:6px;border-radius:3px;background:var(--panel2);overflow:hidden}
+.timer i{display:block;height:100%;width:0;background:var(--coral)}
+.cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.nc{background:var(--panel2);border-radius:12px;padding:10px 8px;text-align:center;display:flex;flex-direction:column;gap:2px;border:1px solid transparent;min-width:0}
+.nc .n{font-family:var(--display);font-weight:600;font-size:18px}
+.nc .s{font-family:var(--mono);font-size:22px}
+.nc .l{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.nc.now{border-color:var(--coral)}
+.nc.g{border-color:color-mix(in srgb,var(--good) 60%,transparent)}
+.nc.w{border-color:color-mix(in srgb,var(--warn) 60%,transparent)}
+.nc.b{border-color:color-mix(in srgb,var(--bad) 50%,transparent)}
+.final{display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:center;background:var(--panel2);border-radius:14px;padding:16px}
+.final .big{font-family:var(--display);font-weight:800;font-size:64px;line-height:1}
+.stars{font-size:22px;letter-spacing:4px;color:var(--warn)}
+.stars .off{color:var(--line)}
+ul.tips{margin:6px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:14px}
+/* range */
+.steps{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.step{background:var(--panel2);border-radius:12px;padding:12px 14px;border:1px solid transparent}
+.step.active{border-color:var(--sky)}
+.step .v{font-family:var(--display);font-weight:800;font-size:34px;line-height:1.1}
+.kbd{width:100%;height:90px;display:block}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.stat{background:var(--panel2);border-radius:12px;padding:12px 14px}
+.stat .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.stat .v{font-family:var(--display);font-weight:600;font-size:24px}
+.drop{border:1.5px dashed var(--line);border-radius:14px;padding:18px;text-align:center;color:var(--muted)}
+.drop.over{border-color:var(--sky);color:var(--fg)}
+.vtype{background:var(--panel2);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;font-size:14px}
+.vtype h3{font-size:19px}
+footer{color:var(--muted);font-size:12px;line-height:1.6}
+@media (max-width:560px){
+  .tabs{grid-template-columns:repeat(2,1fr)}
+  .tuner{grid-template-columns:1fr;gap:8px}
+  .cards{grid-template-columns:repeat(5,minmax(0,1fr));gap:5px}
+  .nc .s{font-size:17px}.nc .n{font-size:15px}
+  .final{grid-template-columns:1fr}
+  .trail{height:190px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Pitch<span>Lab</span></h1>
+      <p class="sub">Live pitch tracking, a note-matching game and a range finder. Prototype.</p>
+    </div>
+  </header>
+
+  <div class="micbar">
+    <span class="dot" id="micDot"></span>
+    <span id="micLabel">Microphone is off</span>
+    <div class="level" aria-hidden="true"><i id="lvl"></i></div>
+    <button class="btn sky" id="micBtn">Turn on microphone</button>
+  </div>
+  <div class="notice" id="micErr" hidden></div>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-tab="tuner" id="t-tuner">Live pitch</button>
+    <button role="tab" aria-selected="false" data-tab="game" id="t-game">Pitch match</button>
+    <button role="tab" aria-selected="false" data-tab="range" id="t-range">Range finder</button>
+    <button role="tab" aria-selected="false" data-tab="file" id="t-file">Analyze a clip</button>
+  </nav>
+
+  <!-- LIVE PITCH -->
+  <section class="card" id="v-tuner">
+    <div class="tuner">
+      <div class="bignote" id="tNote">A<small>3</small></div>
+      <div>
+        <div class="meter" id="meter">
+          <div class="tick" style="left:10%"></div><div class="tick" style="left:30%"></div>
+          <div class="tick" style="left:70%"></div><div class="tick" style="left:90%"></div>
+          <div class="center"></div><div class="needle" id="needle"></div>
+        </div>
+        <div class="scale"><span>−50¢ flat</span><span>in tune</span><span>sharp +50¢</span></div>
+        <div class="readout"><span>Frequency <b id="tHz">220.0 Hz</b></span><span>Off by <b id="tCents">+0¢</b></span><span>Steadiness <b id="tSteady">–</b></span></div>
+      </div>
+    </div>
+    <canvas class="trail tall" id="cTuner"></canvas>
+    <p class="muted" id="tunerHint">Showing an example trace: a synthetic voice gliding up A3, B3, C♯4, D4, E4 with vibrato, run through the same detector. Turn on the microphone and sing to see your own.</p>
+  </section>
+
+  <!-- PITCH MATCH -->
+  <section class="card" id="v-game" hidden>
+    <div class="row between">
+      <h2>Pitch match</h2>
+      <span class="muted" style="font-size:13px">5 notes · listen, then sing it back</span>
+    </div>
+    <div class="row" id="presetRow" role="group" aria-label="Note range">
+      <span class="muted" style="font-size:13px">Notes from:</span>
+    </div>
+    <div class="stage">
+      <div>
+        <div class="phase" id="gPhase">Ready</div>
+        <div class="target" id="gTarget">–</div>
+        <p class="muted" id="gMsg">Press start. You hear a note, then sing it and hold it for 3 seconds.</p>
+      </div>
+      <div class="row">
+        <button class="btn ghost" id="gReplay" disabled>Replay note</button>
+        <button class="btn" id="gStart">Start</button>
+      </div>
+    </div>
+    <div class="timer"><i id="gTimer"></i></div>
+    <canvas class="trail" id="cGame"></canvas>
+    <div class="cards" id="gCards"></div>
+    <div id="gFinal" hidden></div>
+  </section>
+
+  <!-- RANGE FINDER -->
+  <section class="card" id="v-range" hidden>
+    <div class="row between">
+      <h2>Range finder</h2>
+      <button class="btn ghost" id="rReset">Start over</button>
+    </div>
+    <p class="muted" id="rMsg">Step 1: slide down to the lowest note you can hold steadily for a moment. Any vowel works; "ah" is easiest.</p>
+    <div class="steps">
+      <div class="step active" id="rStepLo"><div class="muted" style="font-size:12px">LOWEST HELD</div><div class="v" id="rLo">–</div><div class="muted mono" id="rLoHz" style="font-size:12px">&nbsp;</div></div>
+      <div class="step" id="rStepHi"><div class="muted" style="font-size:12px">HIGHEST HELD</div><div class="v" id="rHi">–</div><div class="muted mono" id="rHiHz" style="font-size:12px">&nbsp;</div></div>
+    </div>
+    <canvas class="trail" id="cRange"></canvas>
+    <div class="row"><span class="muted" style="font-size:13px">Holding now: <b class="mono" id="rNow" style="color:var(--fg)">–</b></span></div>
+    <div class="row"><button class="btn sky" id="rNext">Next: highest note</button></div>
+    <div id="rResult" hidden style="display:flex;flex-direction:column;gap:12px">
+      <canvas class="kbd" id="cKbd"></canvas>
+      <p class="muted" id="rCap" style="font-size:13px"></p>
+      <div class="stats" id="rStats"></div>
+      <div class="vtype" id="rType"></div>
+    </div>
+  </section>
+
+  <!-- ANALYZE A CLIP -->
+  <section class="card" id="v-file" hidden>
+    <div class="row between"><h2>Analyze a recording</h2></div>
+    <p class="muted">Record yourself with your phone's voice memo app, then load it here. Works even where the live microphone is blocked. First 60 seconds are analyzed.</p>
+    <label class="drop" id="drop" for="fileIn">Drop an audio file here or <b style="color:var(--sky)">choose one</b><input type="file" id="fileIn" accept="audio/*,video/*" hidden></label>
+    <p class="muted" id="fMsg">Example below: the synthetic phrase.</p>
+    <canvas class="trail tall" id="cFile"></canvas>
+    <div class="stats" id="fStats"></div>
+  </section>
+
+  <footer>
+    Pitch detection: two-pass YIN on raw microphone audio (echo cancellation and noise suppression off), median-smoothed, about 60 readings a second. Covers C1 to C8; on synthetic test voices it stays within 1 cent from C1 to C5 and within 6 cents up to C8. Real-world limits: many phone mics barely pick up notes below about E1, and above C6 only whistle register reaches. Use headphones or a quiet room; the mic is muted while reference notes play.
+  </footer>
+</div>
+
+<script>
+// ---- Pitch core (portable: no DOM, no Web Audio; port 1:1 to Dart/Kotlin/Swift/C++) ----
+// YIN fundamental-frequency estimator (de Cheveigné & Kawahara, 2002) with
+// cumulative-mean-normalised difference, absolute threshold and parabolic interpolation.
+// x: Float32Array of mono samples, sr: sample rate. Returns {freq, confidence} or null.
+function yin(x, sr, fmin, fmax, threshold) {
+  fmin = fmin || 65; fmax = fmax || 1100; threshold = threshold || 0.15;
+  var N = x.length;
+  var maxTau = Math.min(Math.floor(sr / fmin), (N >> 1) - 1);
+  var minTau = Math.max(2, Math.floor(sr / fmax));
+  var W = N - maxTau - 1;
+  var d = new Float32Array(maxTau + 2);
+  for (var tau = 1; tau <= maxTau + 1; tau++) {
+    var s = 0;
+    for (var j = 0; j < W; j++) { var diff = x[j] - x[j + tau]; s += diff * diff; }
+    d[tau] = s;
+  }
+  // cumulative mean normalised difference d'
+  var cm = new Float32Array(maxTau + 2); cm[0] = 1; var run = 0;
+  for (tau = 1; tau <= maxTau + 1; tau++) { run += d[tau]; cm[tau] = run > 0 ? d[tau] * tau / run : 1; }
+  var best = -1;
+  for (tau = minTau; tau <= maxTau; tau++) {
+    if (cm[tau] < threshold) {
+      while (tau + 1 <= maxTau && cm[tau + 1] < cm[tau]) tau++;
+      best = tau; break;
+    }
+  }
+  if (best < 0) { // no dip under threshold: take global minimum, report low confidence
+    var mv = Infinity;
+    for (tau = minTau; tau <= maxTau; tau++) if (cm[tau] < mv) { mv = cm[tau]; best = tau; }
+  }
+  if (best < 1) return null;
+  var b = cm[best];
+  // interpolate on the raw difference function: it is closer to a parabola near the dip than d',
+  // which matters for high notes where the period is only a few samples long
+  var a = d[best - 1], m0 = d[best], c = d[best + 1];
+  var den = a - 2 * m0 + c, shift = den !== 0 ? 0.5 * (a - c) / den : 0;
+  if (Math.abs(shift) > 1) shift = 0;
+  return { freq: sr / (best + shift), confidence: Math.max(0, 1 - b) };
+}
+function rms(x) { var s = 0; for (var i = 0; i < x.length; i++) s += x[i] * x[i]; return Math.sqrt(s / x.length); }
+var A4 = 440;
+function f2m(f) { return 69 + 12 * Math.log2(f / A4); }
+function m2f(m) { return A4 * Math.pow(2, (m - 69) / 12); }
+var NOTE_NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+function noteName(m) { var r = Math.round(m); return NOTE_NAMES[((r % 12) + 12) % 12] + (Math.floor(r / 12) - 1); }
+function median(a) { var b = a.slice().sort(function (p, q) { return p - q; }); var n = b.length; return n ? (n % 2 ? b[n >> 1] : (b[n / 2 - 1] + b[n / 2]) / 2) : NaN; }
+function mean(a) { var s = 0; for (var i = 0; i < a.length; i++) s += a[i]; return a.length ? s / a.length : NaN; }
+function stdev(a) { var m = mean(a), s = 0; for (var i = 0; i < a.length; i++) s += (a[i] - m) * (a[i] - m); return a.length ? Math.sqrt(s / a.length) : NaN; }
+
+// Score one sung note against a target (MIDI). samples: [{t (ms), m (MIDI or null)}]
+// Octave errors are folded (a man singing a reference an octave down still counts) but flagged.
+function scoreNote(samples, target) {
+  var voiced = samples.filter(function (s) { return s.m != null; });
+  var frac = samples.length ? voiced.length / samples.length : 0;
+  if (voiced.length < 8) return { target: target, score: 0, voicedFrac: frac, none: true };
+  var t0 = voiced[0].t + 400; // let the singer settle onto the note
+  var use = voiced.filter(function (s) { return s.t >= t0; }); if (use.length < 5) use = voiced;
+  var cents = use.map(function (s) { return (s.m - target) * 100; });
+  var med = median(cents), oct = Math.round(med / 1200);
+  if (Math.abs(med - oct * 1200) > 150) oct = 0; // only fold genuine octave errors
+  cents = cents.map(function (c) { return c - oct * 1200; });
+  var absErr = mean(cents.map(Math.abs)), bias = mean(cents), wobble = stdev(cents);
+  var acc = clamp01(1 - Math.max(0, absErr - 5) / 70) * 100;
+  var stab = clamp01(1 - Math.max(0, wobble - 5) / 40) * 100;
+  var score = (0.7 * acc + 0.3 * stab) * Math.min(1, frac / 0.5);
+  return { target: target, score: Math.round(score), absErr: absErr, bias: bias, wobble: wobble, octave: oct, voicedFrac: frac, accuracy: Math.round(acc), stability: Math.round(stab) };
+}
+function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+
+// Held-note detector for range finding: a note counts once pitch has stayed within
+// ~0.3 semitone (std) for holdMs with no gap longer than 120 ms.
+function heldNote(win, now, holdMs) {
+  holdMs = holdMs || 600;
+  var w = win.filter(function (s) { return s.t >= now - holdMs; });
+  if (!w.length || w[0].t > now - holdMs + 80) return null;
+  for (var i = 0; i < w.length; i++) { if (w[i].m == null) return null; if (i && w[i].t - w[i - 1].t > 120) return null; }
+  var ms = w.map(function (s) { return s.m; });
+  return stdev(ms) < 0.3 ? median(ms) : null;
+}
+
+// Wide-range detector, C1 (32.7 Hz) to C8 (4186 Hz).
+// Pass 1: YIN on the newest ~43 ms at full rate, 60-4400 Hz (fast reaction, sub-cent resolution for high notes).
+// Pass 2: YIN on the whole buffer (needs >= ~85 ms) decimated to ~11-12 kHz, 30-300 Hz. Low notes need a window
+// at least 2-3 periods long, which pass 1 cannot see. Pass 2's first dip can only land under 75 Hz when the pitch
+// really is that low, so it wins only there.
+function detectPitch(x, sr) {
+  var mainLen = Math.min(x.length, Math.round(sr * 0.043));
+  var main = yin(x.subarray(x.length - mainLen), sr, 60, 4400, 0.15);
+  var D = Math.max(1, Math.floor(sr / 11025)), n = Math.floor(x.length / D), dec = new Float32Array(n);
+  for (var i = 0; i < n; i++) { var s = 0; for (var k = 0; k < D; k++) s += x[i * D + k]; dec[i] = s / D; }
+  var low = n > 2 * (sr / D / 30) ? yin(dec, sr / D, 30, 300, 0.15) : null;
+  if (low && low.confidence > 0.8 && low.freq < 75) return low;
+  if (main && main.confidence > 0.8) return main;
+  return null;
+}
+
+// Voice type as a likelihood, never a verdict. Typical comfortable classical ranges (MIDI).
+var VOICE_TYPES = [
+  { name: 'bass', lo: 40, hi: 64, about: 'the lowest male voice: dark, heavy and resonant, at home around E2 to E4' },
+  { name: 'baritone', lo: 45, hi: 69, about: 'the most common male voice: warm and full, sitting between bass and tenor, around A2 to A4' },
+  { name: 'tenor', lo: 48, hi: 72, about: 'the highest common male voice: bright and ringing, around C3 to C5' },
+  { name: 'countertenor', lo: 55, hi: 77, about: 'a male voice singing mostly in head voice or falsetto, roughly alto territory, around G3 to F5' },
+  { name: 'contralto', lo: 53, hi: 77, about: 'the lowest female voice: rich and dark, around F3 to F5' },
+  { name: 'mezzo-soprano', lo: 57, hi: 81, about: 'the middle female voice: warm with a strong middle register, around A3 to A5' },
+  { name: 'soprano', lo: 60, hi: 84, about: 'the highest female voice: light and bright, around C4 to C6' }];
+function voiceTypeLikelihood(lo, hi) {
+  var ranked = VOICE_TYPES.map(function (v) {
+    var ov = Math.max(0, Math.min(hi, v.hi) - Math.max(lo, v.lo));
+    var cover = ov / (v.hi - v.lo);           // how much of the type's range you reached
+    var fitIn = ov / Math.max(1, hi - lo);    // how much of your range sits inside the type
+    var centre = 1 - Math.min(1, Math.abs((lo + hi) / 2 - (v.lo + v.hi) / 2) / 12);
+    return { type: v, cover: cover, fitIn: fitIn, score: 0.4 * cover + 0.3 * fitIn + 0.3 * centre };
+  }).sort(function (a, b) { return b.score - a.score; });
+  var top = ranked[0], alts = ranked.slice(1).filter(function (r) { return r.score >= top.score * 0.85; }).slice(0, 2);
+  var span = hi - lo, notes = [];
+  if (span < 14) notes.push('Your measured range is fairly narrow (' + span + ' semitones), which fits several voice types, so treat this as an early guess. Ranges usually grow with warm-up and practice.');
+  if (lo <= 36) notes.push('Your lowest note (' + noteName(lo) + ') is below the usual bass range, which often means vocal fry or a very low "oktavist" bass voice.');
+  if (hi >= 88) notes.push('Your highest note (' + noteName(hi) + ') reaches whistle-register territory above the usual soprano range.');
+  return { likely: top.type, fit: top.fitIn >= 0.8 && top.cover >= 0.7 ? 'good' : (span > top.type.hi - top.type.lo + 8 ? 'wide' : 'partial'), possible: alts.map(function (a) { return a.type; }), notes: notes };
+}
+function guessVoiceType(lo, hi) { return voiceTypeLikelihood(lo, hi).likely; }
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { detectPitch: detectPitch, voiceTypeLikelihood: voiceTypeLikelihood, yin: yin, rms: rms, f2m: f2m, m2f: m2f, noteName: noteName, scoreNote: scoreNote, heldNote: heldNote, guessVoiceType: guessVoiceType, median: median };
+
+// ---- App (browser only) ----
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var css = getComputedStyle(document.documentElement);
+  var C = {}; ['bg', 'panel2', 'line', 'fg', 'muted', 'coral', 'sky', 'good', 'warn', 'bad'].forEach(function (k) { C[k] = css.getPropertyValue('--' + k).trim(); });
+  var store = { get: function (k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }, set: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } } };
+  var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+
+  // ---------- audio engine ----------
+  var eng = { ctx: null, an: null, buf: null, on: false, muteUntil: 0, hist: [], trail: [], subs: [] };
+  function ctx() { if (!eng.ctx) eng.ctx = new (window.AudioContext || window.webkitAudioContext)(); return eng.ctx; }
+
+  async function startMic() {
+    $('micErr').hidden = true;
+    try {
+      var c = ctx(); await c.resume();
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw { name: 'Unsupported' };
+      var stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      var src = c.createMediaStreamSource(stream);
+      var an = c.createAnalyser(); an.fftSize = 4096; /* ~85 ms: long enough to see C1 (32.7 Hz) */ src.connect(an);
+      eng.src = src; eng.stream = stream; // keep the graph referenced
+      eng.an = an; eng.buf = new Float32Array(an.fftSize); eng.on = true; eng.trail = [];
+      $('micDot').classList.add('on'); $('micLabel').textContent = 'Listening'; $('micBtn').hidden = true;
+      $('tunerHint').textContent = 'Sing or hum any note. The line shows your pitch over the last 6 seconds; dashed lines are the notes of the scale.';
+      requestAnimationFrame(loop);
+      return true;
+    } catch (e) {
+      var msg;
+      if (e && e.name === 'NotAllowedError') msg = 'The microphone was blocked. If you are viewing this inside Claude, the page is not allowed to use the mic there: open the standalone <b>pitch-lab.html</b> file in Chrome or Safari instead, or use <b>Analyze a clip</b> with a voice memo. In a normal browser tab, allow the mic in the address bar and try again.';
+      else if (e && e.name === 'NotFoundError') msg = 'No microphone was found on this device.';
+      else msg = 'This browser view cannot open the microphone. Open the standalone <b>pitch-lab.html</b> file in Chrome or Safari, or use <b>Analyze a clip</b> with a voice memo.';
+      $('micErr').innerHTML = msg; $('micErr').hidden = false;
+      return false;
+    }
+  }
+  $('micBtn').onclick = startMic;
+
+  function loop() {
+    if (!eng.on) return;
+    var now = performance.now();
+    eng.an.getFloatTimeDomainData(eng.buf);
+    var level = rms(eng.buf), m = null;
+    $('lvl').style.width = Math.min(100, level * 600) + '%';
+    if (level > 0.006 && now > eng.muteUntil) {
+      var r = detectPitch(eng.buf, eng.ctx.sampleRate);
+      if (r) m = f2m(r.freq);
+    }
+    // 3-point median smoothing over recent voiced frames (kills single-frame octave blips)
+    if (m != null) {
+      eng.hist.push({ t: now, m: m }); eng.hist = eng.hist.filter(function (h) { return h.t > now - 90; }).slice(-3);
+      m = median(eng.hist.map(function (h) { return h.m; }));
+    } else eng.hist = [];
+    eng.trail.push({ t: now, m: m });
+    while (eng.trail.length && eng.trail[0].t < now - 8000) eng.trail.shift();
+    eng.subs.forEach(function (fn) { fn(m, now); });
+    render(now);
+    requestAnimationFrame(loop);
+  }
+
+  function playTone(midi, dur) {
+    var c = ctx(); c.resume();
+    var t = c.currentTime + 0.02, f = m2f(midi), g = c.createGain();
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.28, t + 0.04);
+    g.gain.setValueAtTime(0.28, t + dur - 0.15); g.gain.linearRampToValueAtTime(0, t + dur);
+    g.connect(c.destination);
+    [[f, 'triangle', 1], [2 * f, 'sine', 0.25], [3 * f, 'sine', 0.08]].forEach(function (p) {
+      var o = c.createOscillator(), og = c.createGain(); o.type = p[1]; o.frequency.value = p[0]; og.gain.value = p[2];
+      o.connect(og); og.connect(g); o.start(t); o.stop(t + dur + 0.05);
+    });
+    eng.muteUntil = performance.now() + dur * 1000 + 250;
+    return sleep(dur * 1000 + 250);
+  }
+
+  // ---------- canvas helpers ----------
+  function fit(cv) {
+    var dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    var g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); return { g: g, w: w, h: h };
+  }
+  // pts: [{t,m}], o: {t0,t1,lo,hi,target,band,marks:[{m,color,label}]}
+  function drawTrail(cv, pts, o) {
+    var F = fit(cv), g = F.g, w = F.w, h = F.h, padL = 40;
+    g.clearRect(0, 0, w, h);
+    var y = function (m) { return h - 10 - (m - o.lo) / (o.hi - o.lo) * (h - 20); };
+    var x = function (t) { return padL + (t - o.t0) / (o.t1 - o.t0) * (w - padL - 8); };
+    g.font = '11px ' + css.getPropertyValue('--mono'); g.textBaseline = 'middle';
+    for (var n = Math.ceil(o.lo); n <= Math.floor(o.hi); n++) {
+      var nat = [0, 2, 4, 5, 7, 9, 11].indexOf(((n % 12) + 12) % 12) >= 0;
+      if (!nat) continue;
+      g.strokeStyle = C.line; g.lineWidth = 1; g.setLineDash(n % 12 === 0 ? [] : [3, 4]);
+      g.beginPath(); g.moveTo(padL, y(n)); g.lineTo(w - 4, y(n)); g.stroke();
+      if (o.hi - o.lo < 20 || n % 12 === 0) { g.fillStyle = n % 12 === 0 ? C.fg : C.muted; g.fillText(noteName(n), 4, y(n)); }
+    }
+    g.setLineDash([]);
+    if (o.target != null) {
+      var bw = (o.band || 0.25);
+      g.fillStyle = hexA(C.good, 0.2);
+      g.fillRect(padL, y(o.target + bw), w - padL - 4, y(o.target - bw) - y(o.target + bw));
+      g.strokeStyle = C.good; g.lineWidth = 1.5; g.beginPath(); g.moveTo(padL, y(o.target)); g.lineTo(w - 4, y(o.target)); g.stroke();
+    }
+    (o.marks || []).forEach(function (mk) {
+      g.strokeStyle = mk.color; g.lineWidth = 2; g.setLineDash([6, 4]); g.beginPath(); g.moveTo(padL, y(mk.m)); g.lineTo(w - 4, y(mk.m)); g.stroke(); g.setLineDash([]);
+      g.fillStyle = mk.color; g.textAlign = 'right'; g.fillText(mk.label, w - 8, y(mk.m) - 9); g.textAlign = 'left';
+    });
+    g.lineWidth = 3; g.lineCap = 'round'; g.lineJoin = 'round';
+    var prev = null;
+    for (var i = 0; i < pts.length; i++) {
+      var p = pts[i];
+      if (p.m == null || p.t < o.t0) { prev = null; continue; }
+      var col = C.sky;
+      if (o.target != null) { var d = Math.abs((p.m - o.target) * 100 - Math.round((p.m - o.target) / 12) * 1200); col = d < 25 ? C.good : d < 60 ? C.warn : C.coral; }
+      if (prev && p.t - prev.t < 150 && Math.abs(p.m - prev.m) < 3) {
+        g.strokeStyle = col; g.beginPath(); g.moveTo(x(prev.t), y(Math.min(o.hi, Math.max(o.lo, prev.m)))); g.lineTo(x(p.t), y(Math.min(o.hi, Math.max(o.lo, p.m)))); g.stroke();
+      }
+      prev = p;
+    }
+  }
+  function hexA(hex, a) { var n = parseInt(hex.slice(1), 16); return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')'; }
+  // keep the live view centred on the voice, easing rather than jumping
+  var view = { c: 57 };
+  function liveWindow(now, spread) {
+    var recent = eng.trail.filter(function (p) { return p.m != null && p.t > now - 2500; }).map(function (p) { return p.m; });
+    if (recent.length > 5) view.c += (median(recent) - view.c) * 0.08;
+    return { t0: now - 6000, t1: now, lo: view.c - (spread || 8), hi: view.c + (spread || 8) };
+  }
+
+  // ---------- tabs ----------
+  var tab = 'tuner';
+  document.querySelectorAll('.tabs button').forEach(function (b) {
+    b.onclick = function () {
+      tab = b.dataset.tab;
+      document.querySelectorAll('.tabs button').forEach(function (x) { x.setAttribute('aria-selected', x === b); });
+      ['tuner', 'game', 'range', 'file'].forEach(function (t) { $('v-' + t).hidden = t !== tab; });
+      if (tab === 'file') drawFile(); else if (!eng.on) renderIdle();
+    };
+  });
+
+  function render(now) {
+    if (tab === 'tuner') renderTuner(now);
+    else if (tab === 'game') renderGame(now);
+    else if (tab === 'range') renderRange(now);
+  }
+
+  // ---------- live pitch ----------
+  function setTuner(m, steadyCents) {
+    if (m == null) { $('needle').style.background = C.muted; return; }
+    var r = Math.round(m), cents = (m - r) * 100, name = noteName(r);
+    $('tNote').innerHTML = name.slice(0, -1) + '<small>' + name.slice(-1) + '</small>';
+    $('needle').style.left = (50 + cents) + '%';
+    $('needle').style.background = Math.abs(cents) < 10 ? C.good : Math.abs(cents) < 25 ? C.warn : C.coral;
+    $('tHz').textContent = m2f(m).toFixed(1) + ' Hz';
+    $('tCents').textContent = (cents >= 0 ? '+' : '−') + Math.abs(cents).toFixed(0) + '¢';
+    if (steadyCents != null) $('tSteady').textContent = steadyCents < 8 ? 'rock solid' : steadyCents < 18 ? 'steady' : steadyCents < 35 ? 'wavering' : 'sliding';
+  }
+  function renderTuner(now) {
+    var last = eng.trail[eng.trail.length - 1];
+    var rec = eng.trail.filter(function (p) { return p.m != null && p.t > now - 500; }).map(function (p) { return p.m * 100; });
+    setTuner(last && last.m, rec.length > 10 ? stdev(rec) : null);
+    drawTrail($('cTuner'), eng.trail, liveWindow(now));
+  }
+
+  // ---------- pitch match game ----------
+  var PRESETS = [
+    { id: 'low', label: 'Low (bass, baritone)', lo: 43, hi: 55 },
+    { id: 'mid', label: 'Middle (tenor, alto)', lo: 50, hi: 62 },
+    { id: 'high', label: 'High (mezzo, soprano)', lo: 57, hi: 69 }];
+  var savedRange = store.get('pitchlab.range');
+  if (savedRange) PRESETS.unshift({ id: 'mine', label: 'My range (' + noteName(savedRange.lo) + '–' + noteName(savedRange.hi) + ')', lo: Math.round(savedRange.lo) + 2, hi: Math.round(savedRange.hi) - 2 });
+  var preset = PRESETS[0].id === 'mine' ? 'mine' : 'mid';
+  function drawPresets() {
+    var row = $('presetRow'); row.querySelectorAll('.chip').forEach(function (c) { c.remove(); });
+    PRESETS.forEach(function (p) {
+      var b = document.createElement('button'); b.className = 'chip'; b.textContent = p.label; b.setAttribute('aria-pressed', p.id === preset);
+      b.onclick = function () { if (game.running) return; preset = p.id; drawPresets(); }; row.appendChild(b);
+    });
+  }
+  drawPresets();
+
+  var game = { running: false, notes: [], idx: -1, results: [], target: null, phase: 'idle', phaseStart: 0, phaseLen: 1, token: 0 };
+  function pickNotes() {
+    var p = PRESETS.find(function (x) { return x.id === preset; }); var lo = p.lo, hi = Math.max(p.hi, p.lo + 5), out = [];
+    while (out.length < 5) { var n = lo + Math.floor(Math.random() * (hi - lo + 1)); if (!out.length || Math.abs(n - out[out.length - 1]) >= 2) out.push(n); }
+    return out;
+  }
+  function drawCards() {
+    $('gCards').innerHTML = game.notes.map(function (n, i) {
+      var r = game.results[i], cls = 'nc', s = '·', l = '&nbsp;';
+      if (r) { cls += r.score >= 75 ? ' g' : r.score >= 50 ? ' w' : ' b'; s = r.score; l = verdict(r); }
+      if (i === game.idx && !r) cls += ' now';
+      return '<div class="' + cls + '"><div class="n">' + noteName(n) + '</div><div class="s">' + s + '</div><div class="l">' + l + '</div></div>';
+    }).join('');
+  }
+  function verdict(r) {
+    if (r.none) return 'not heard';
+    if (r.score >= 90) return 'bullseye';
+    if (Math.abs(r.bias) >= 70) { var st = Math.round(Math.abs(r.bias) / 100); return st < 1 ? 'off by ~1 step' : (st === 1 ? 'a semitone ' : st + ' semitones ') + (r.bias > 0 ? 'high' : 'low'); }
+    var dir = Math.abs(r.bias) < 12 ? (r.wobble > 25 ? 'wobbly' : 'close') : (r.bias > 0 ? Math.round(r.bias) + '¢ sharp' : Math.round(-r.bias) + '¢ flat');
+    return dir;
+  }
+  async function runGame() {
+    if (!eng.on && !(await startMic())) return;
+    var tok = ++game.token;
+    game.running = true; game.notes = pickNotes(); game.results = []; game.idx = -1;
+    $('gFinal').hidden = true; $('gStart').textContent = 'Stop'; $('gReplay').disabled = false;
+    for (var i = 0; i < game.notes.length; i++) {
+      if (tok !== game.token) return;
+      game.idx = i; game.target = game.notes[i]; drawCards();
+      $('gTarget').textContent = noteName(game.target);
+      setPhase('listen', 1300); $('gMsg').textContent = 'Listen to the note.';
+      await playTone(game.target, 1.3);
+      if (tok !== game.token) return;
+      setPhase('sing', 3000); $('gMsg').textContent = 'Sing it and hold it steady. Stay inside the green band.';
+      var samples = await capture(3000);
+      if (tok !== game.token) return;
+      var r = scoreNote(samples, game.target); game.results.push(r); drawCards();
+      $('gMsg').textContent = r.none ? 'No voice heard on that one. Sing a bit louder next time.' : verdict(r) === 'bullseye' ? 'Bullseye!' : 'Scored ' + r.score + '. ' + capital(verdict(r)) + '.';
+      setPhase('rest', 900); await sleep(900);
+    }
+    game.running = false; game.idx = -1; game.target = null; setPhase('idle', 1);
+    $('gStart').textContent = 'Play again'; $('gReplay').disabled = true; drawCards(); showFinal();
+  }
+  function capital(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+  function capture(ms) {
+    return new Promise(function (res) {
+      var out = [], t0 = performance.now();
+      var fn = function (m, now) { out.push({ t: now, m: m }); if (now - t0 >= ms) { eng.subs = eng.subs.filter(function (f) { return f !== fn; }); res(out); } };
+      eng.subs.push(fn);
+    });
+  }
+  function setPhase(p, len) {
+    game.phase = p; game.phaseStart = performance.now(); game.phaseLen = len;
+    var el = $('gPhase'); el.className = 'phase' + (p === 'sing' ? ' sing' : '');
+    el.textContent = { listen: 'Listen', sing: 'Sing now', rest: 'Nice', idle: 'Ready' }[p];
+  }
+  function showFinal() {
+    var rs = game.results, total = Math.round(mean(rs.map(function (r) { return r.score; })));
+    var heard = rs.filter(function (r) { return !r.none; });
+    var stars = total >= 90 ? 5 : total >= 75 ? 4 : total >= 60 ? 3 : total >= 40 ? 2 : 1;
+    var tips = [];
+    if (heard.length) {
+      var bias = mean(heard.map(function (r) { return r.bias; })), wob = mean(heard.map(function (r) { return r.wobble; }));
+      var err = mean(heard.map(function (r) { return r.absErr; }));
+      tips.push('Average distance from the target: <b>' + Math.round(err) + ' cents</b> (100 cents = one semitone; trained singers usually land within 10–20).');
+      if (Math.abs(bias) >= 10) tips.push('You tend to sing <b>' + (bias > 0 ? 'sharp' : 'flat') + '</b> by about ' + Math.round(Math.abs(bias)) + ' cents. ' + (bias < 0 ? 'Flat singing often comes from low breath support; try a slightly brighter "ee" vowel.' : 'Sharp singing is often tension; relax the jaw and keep the note light.'));
+      else tips.push('No consistent sharp or flat tendency. Your ear is centred.');
+      tips.push(wob < 12 ? 'Your held notes were very steady.' : wob < 25 ? 'Your held notes were fairly steady with a little drift.' : 'Your notes wavered quite a bit. Long, quiet "hmm" holds build steadiness.');
+      if (heard.some(function (r) { return r.octave; })) tips.push('Some notes were sung an octave away from the reference. That still counts; it just means the reference sits outside your natural octave.');
+    } else tips.push('No singing was detected. Check that the mic level bar moves when you sing.');
+    $('gFinal').innerHTML = '<div class="final"><div><div class="big">' + total + '</div><div class="stars">' + '★★★★★'.slice(0, stars) + '<span class="off">' + '★★★★★'.slice(stars) + '</span></div></div><div><h3>' + (total >= 90 ? 'Perfect pitch territory' : total >= 75 ? 'Great ear' : total >= 55 ? 'Getting there' : 'Warm-up round') + '</h3><ul class="tips"><li>' + tips.join('</li><li>') + '</li></ul></div></div>';
+    $('gFinal').hidden = false;
+    var best = store.get('pitchlab.best') || 0; if (total > best) store.set('pitchlab.best', total);
+  }
+  $('gStart').onclick = function () {
+    if (game.running) { game.token++; game.running = false; game.target = null; setPhase('idle', 1); $('gStart').textContent = 'Start'; $('gReplay').disabled = true; $('gMsg').textContent = 'Stopped.'; return; }
+    runGame();
+  };
+  $('gReplay').onclick = function () { if (game.target != null && game.phase === 'sing') playTone(game.target, 1.0); };
+  function renderGame(now) {
+    var w = liveWindow(now, 7);
+    if (game.target != null) { view.c += (game.target - view.c) * 0.15; w.lo = view.c - 7; w.hi = view.c + 7; }
+    drawTrail($('cGame'), eng.trail, Object.assign(w, { target: game.target, band: 0.25 }));
+    var p = game.phase === 'idle' ? 0 : Math.min(1, (now - game.phaseStart) / game.phaseLen);
+    $('gTimer').style.width = (p * 100) + '%';
+    $('gTimer').style.background = game.phase === 'sing' ? C.coral : C.sky;
+  }
+
+  // ---------- range finder ----------
+  var rng = { step: 'lo', lo: null, hi: null };
+  eng.subs.push(function (m, now) {
+    if (tab !== 'range' || rng.step === 'done') return;
+    var h = heldNote(eng.trail, now, 600);
+    $('rNow').textContent = h != null ? noteName(h) : '–';
+    if (h == null) return;
+    if (rng.step === 'lo' && (rng.lo == null || h < rng.lo)) { rng.lo = h; setRangeUI(); }
+    if (rng.step === 'hi' && (rng.hi == null || h > rng.hi)) { rng.hi = h; setRangeUI(); }
+  });
+  function setRangeUI() {
+    $('rLo').textContent = rng.lo != null ? noteName(rng.lo) : '–'; $('rLoHz').textContent = rng.lo != null ? m2f(rng.lo).toFixed(0) + ' Hz' : ' ';
+    $('rHi').textContent = rng.hi != null ? noteName(rng.hi) : '–'; $('rHiHz').textContent = rng.hi != null ? m2f(rng.hi).toFixed(0) + ' Hz' : ' ';
+    $('rStepLo').classList.toggle('active', rng.step === 'lo'); $('rStepHi').classList.toggle('active', rng.step === 'hi');
+  }
+  $('rNext').onclick = async function () {
+    if (!eng.on && !(await startMic())) return;
+    if (rng.step === 'lo') {
+      if (rng.lo == null) { $('rMsg').textContent = 'No held note yet. Sing a low note and hold it for about a second.'; return; }
+      rng.step = 'hi'; $('rNext').textContent = 'Finish'; $('rMsg').textContent = 'Step 2: now slide up to the highest note you can hold steadily. Falsetto and head voice count.'; view.c = rng.lo + 12;
+    } else if (rng.step === 'hi') {
+      if (rng.hi == null) { $('rMsg').textContent = 'No high note held yet. Slide up and hold for about a second.'; return; }
+      rng.step = 'done'; $('rNext').hidden = true; showRange();
+    }
+    setRangeUI();
+  };
+  $('rReset').onclick = function () { rng = { step: 'lo', lo: null, hi: null }; $('rNext').hidden = false; $('rNext').textContent = 'Next: highest note'; $('rResult').hidden = true; $('rMsg').textContent = 'Step 1: slide down to the lowest note you can hold steadily for a moment. Any vowel works; "ah" is easiest.'; setRangeUI(); };
+  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+  function showRange() {
+    var lo = Math.round(rng.lo), hi = Math.round(rng.hi), span = hi - lo, vl = voiceTypeLikelihood(lo, hi), vt = vl.likely;
+    store.set('pitchlab.range', { lo: lo, hi: hi });
+    $('rMsg').textContent = 'Done. Your range is saved and Pitch match can now use it.';
+    $('rStats').innerHTML = [
+      ['Range', noteName(lo) + ' – ' + noteName(hi)], ['Span', span + ' semitones'], ['Octaves', (span / 12).toFixed(1)], ['Most likely', cap(vt.name)]
+    ].map(function (s) { return '<div class="stat"><div class="k">' + s[0] + '</div><div class="v">' + s[1] + '</div></div>'; }).join('');
+    var html = '<h3>You are most likely a ' + vt.name + '</h3><p>A ' + vt.name + ' is ' + vt.about + '. ' + (vl.fit === 'good' ? 'Your range of ' + noteName(lo) + ' to ' + noteName(hi) + ' fits that well.' : vl.fit === 'wide' ? 'Your range of ' + noteName(lo) + ' to ' + noteName(hi) + ' is wider than any single voice type, and its middle sits closest to a ' + vt.name + '.' : 'Your range of ' + noteName(lo) + ' to ' + noteName(hi) + ' overlaps most with a ' + vt.name + ', though not completely.') + '</p>';
+    if (vl.possible.length) html += '<p>' + vl.possible.map(function (v) { return cap(v.name); }).join(' or ') + (vl.possible.length > 1 ? ' are' : ' is') + ' also possible: ' + vl.possible.map(function (v) { return 'a ' + v.name + ' is ' + v.about; }).join('; ') + '.</p>';
+    vl.notes.forEach(function (n) { html += '<p>' + n + '</p>'; });
+    html += '<p class="muted">This is a likelihood, not a final answer. Range is only one clue: voice type also depends on where your voice feels most comfortable, where it shifts between registers, and its tone colour. Later tests in the app will measure those.</p>';
+    $('rType').innerHTML = html;
+    $('rCap').textContent = 'Blue keys: your range. Orange bar: typical ' + vt.name + ' range (' + noteName(vt.lo) + '–' + noteName(vt.hi) + ').';
+    $('rResult').hidden = false; drawKeyboard(lo, hi, vt);
+  }
+  function drawKeyboard(lo, hi, vt) {
+    var cv = $('cKbd'), F = fit(cv), g = F.g, w = F.w, h = F.h, from = 24, to = 108; // C1..C8, the range the detector covers
+    var whites = []; for (var n = from; n <= to; n++) if ([1, 3, 6, 8, 10].indexOf(n % 12) < 0) whites.push(n);
+    var kw = w / whites.length; g.clearRect(0, 0, w, h);
+    whites.forEach(function (n, i) {
+      g.fillStyle = n >= lo && n <= hi ? C.sky : C.fg; g.globalAlpha = n >= lo && n <= hi ? 1 : 0.85;
+      g.fillRect(i * kw + 0.5, 14, kw - 1, h - 30); g.globalAlpha = 1;
+      if (n % 12 === 0) { g.fillStyle = C.muted; g.font = '10px ' + css.getPropertyValue('--mono'); g.fillText(noteName(n), i * kw + 2, h - 6); }
+    });
+    whites.forEach(function (n, i) {
+      if ([0, 2, 5, 7, 9].indexOf(n % 12) >= 0 && n + 1 <= to) {
+        g.fillStyle = n + 1 >= lo && n + 1 <= hi ? '#2f86b8' : C.bg; g.fillRect((i + 1) * kw - kw * 0.3, 14, kw * 0.6, (h - 30) * 0.6);
+      }
+    });
+    var vx0 = whites.indexOf(vt.lo) >= 0 ? whites.indexOf(vt.lo) * kw : 0, vx1 = whites.indexOf(vt.hi) >= 0 ? (whites.indexOf(vt.hi) + 1) * kw : w;
+    g.fillStyle = C.coral; g.fillRect(vx0, 4, vx1 - vx0, 5);
+  }
+  function renderRange(now) {
+    var w = liveWindow(now, 10), marks = [];
+    if (rng.lo != null) marks.push({ m: rng.lo, color: C.sky, label: 'low ' + noteName(rng.lo) });
+    if (rng.hi != null) marks.push({ m: rng.hi, color: C.coral, label: 'high ' + noteName(rng.hi) });
+    drawTrail($('cRange'), eng.trail, Object.assign(w, { marks: marks }));
+  }
+
+  // ---------- offline analysis (file + demo) ----------
+  var fileTrace = null, fileName = '';
+  async function analyze(x, sr, onProgress) {
+    var frame = sr > 30000 ? 4096 : 2048, hop = Math.round(sr * 0.02), out = [], peak = 0, n = Math.min(x.length, sr * 60);
+    for (var i = 0; i + frame < n; i += hop * 4) peak = Math.max(peak, rms(x.subarray(i, i + frame)));
+    var gate = Math.max(0.003, peak * 0.08), hist = [];
+    for (i = 0; i + frame < n; i += hop) {
+      var seg = x.subarray(i, i + frame), m = null;
+      if (rms(seg) > gate) { var r = detectPitch(seg, sr); if (r) m = f2m(r.freq); }
+      if (m != null) { hist.push(m); if (hist.length > 3) hist.shift(); m = median(hist); } else hist = [];
+      out.push({ t: i / sr * 1000, m: m });
+      if (out.length % 400 === 0) { onProgress && onProgress(i / n); await sleep(0); }
+    }
+    return out;
+  }
+  function stats(trace) {
+    var v = trace.filter(function (p) { return p.m != null; }).map(function (p) { return p.m; });
+    if (v.length < 10) return null;
+    var s = v.slice().sort(function (a, b) { return a - b; });
+    var lo = s[Math.floor(s.length * 0.03)], hi = s[Math.floor(s.length * 0.97)];
+    var centre = mean(v.map(function (m) { return Math.abs(m - Math.round(m)) * 100; }));
+    return { lo: lo, hi: hi, med: median(v), centre: centre, voiced: v.length / trace.length, dur: trace[trace.length - 1].t / 1000 };
+  }
+  function drawFile() {
+    if (!fileTrace) return;
+    var st = stats(fileTrace), lo = st ? Math.floor(st.lo) - 3 : 45, hi = st ? Math.ceil(st.hi) + 3 : 70;
+    drawTrail($('cFile'), fileTrace, { t0: 0, t1: fileTrace[fileTrace.length - 1].t, lo: lo, hi: hi });
+    $('fStats').innerHTML = st ? [
+      ['Notes sung', noteName(st.lo) + ' – ' + noteName(st.hi)], ['Centre of voice', noteName(st.med)],
+      ['Avg distance to nearest note', Math.round(st.centre) + '¢'], ['Voiced', Math.round(st.voiced * 100) + '% of ' + st.dur.toFixed(1) + 's']
+    ].map(function (s) { return '<div class="stat"><div class="k">' + s[0] + '</div><div class="v">' + s[1] + '</div></div>'; }).join('') : '<p class="muted">No clear singing found in this clip.</p>';
+  }
+  async function loadFile(file) {
+    if (!file) return;
+    $('fMsg').textContent = 'Decoding ' + file.name + '…';
+    try {
+      var ab = await file.arrayBuffer(), c = ctx();
+      var buf = await new Promise(function (res, rej) { var p = c.decodeAudioData(ab, res, rej); if (p && p.catch) p.catch(rej); });
+      var SR = 44100, len = Math.ceil(Math.min(buf.duration, 60) * SR);
+      var OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext, oc = new OAC(1, len, SR);
+      var src = oc.createBufferSource(); src.buffer = buf; src.connect(oc.destination); src.start();
+      var rendered = await oc.startRendering();
+      fileTrace = await analyze(rendered.getChannelData(0), SR, function (p) { $('fMsg').textContent = 'Analyzing… ' + Math.round(p * 100) + '%'; });
+      $('fMsg').textContent = file.name; drawFile();
+    } catch (e) { $('fMsg').textContent = 'Could not read that file. Try an .m4a, .mp3 or .wav recording.'; }
+  }
+  $('fileIn').onchange = function (e) { loadFile(e.target.files[0]); };
+  var drop = $('drop');
+  drop.addEventListener('dragover', function (e) { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', function () { drop.classList.remove('over'); });
+  drop.addEventListener('drop', function (e) { e.preventDefault(); drop.classList.remove('over'); loadFile(e.dataTransfer.files[0]); });
+
+  // ---------- example data at rest (synthetic voice through the real detector) ----------
+  var demo = null;
+  function synthVoice() {
+    var SR = 22050, notes = [57, 59, 61, 62, 64, 64], dur = 0.75, n = Math.floor(SR * dur * notes.length), x = new Float32Array(n), ph = 0, cur = 57;
+    for (var i = 0; i < n; i++) {
+      var t = i / SR, k = Math.min(notes.length - 1, Math.floor(t / dur)), tgt = notes[k];
+      cur += (tgt - cur) * 0.0015; // portamento
+      var m = cur + 0.25 * Math.sin(2 * Math.PI * 5.5 * t) * Math.min(1, (t % dur) / 0.3);
+      ph += 2 * Math.PI * m2f(m) / SR;
+      var s = 0; for (var hm = 1; hm <= 8; hm++) s += Math.sin(hm * ph) / hm;
+      var gap = (t % dur) > dur - 0.06 && k < notes.length - 1 ? 0 : 1;
+      x[i] = s * 0.25 * gap + (Math.random() * 2 - 1) * 0.004;
+    }
+    return { x: x, sr: SR };
+  }
+  function renderIdle() {
+    if (!demo) return;
+    var end = demo[demo.length - 1].t;
+    var shifted = demo.map(function (p) { return { t: p.t + 1000, m: p.m }; });
+    drawTrail($('cTuner'), shifted, { t0: 0, t1: end + 1500, lo: 52, hi: 68 });
+    var mid = demo.filter(function (p) { return p.m != null && Math.abs(p.m - 61) < 0.1; }); if (mid.length) setTuner(mid[0].m, 12);
+    drawTrail($('cGame'), shifted.slice(0, 120), { t0: 0, t1: 6000, lo: 50, hi: 64, target: 57, band: 0.25 });
+    drawTrail($('cRange'), [], { t0: 0, t1: 6000, lo: 45, hi: 65 });
+  }
+  (async function () {
+    var v = synthVoice(); demo = await analyze(v.x, v.sr); fileTrace = demo;
+    game.notes = [57, 60, 55, 62, 59]; drawCards(); game.notes = [];
+    renderIdle(); drawFile();
+  })();
+  window.addEventListener('resize', function () { if (!eng.on) renderIdle(); drawFile(); });
+})();
+
+</script>
+</body></html>
