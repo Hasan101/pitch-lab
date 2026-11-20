@@ -84,7 +84,20 @@ ul.tips{margin:6px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:
 .step{background:var(--panel2);border-radius:12px;padding:12px 14px;border:1px solid transparent}
 .step.active{border-color:var(--sky)}
 .step .v{font-family:var(--display);font-weight:800;font-size:34px;line-height:1.1}
-.kbd{width:100%;height:90px;display:block}
+.kbd{width:100%;height:100px;display:block}
+.reg{font-size:12px;min-height:18px}
+.pill{display:inline-block;font:600 11px var(--body);letter-spacing:.04em;padding:2px 9px;border-radius:999px;background:var(--panel2);color:var(--muted);box-shadow:inset 0 0 0 1px var(--line)}
+.pill.fry{background:var(--warn);color:#2a1d00;box-shadow:none}
+.pill.whistle{background:var(--sky);color:#06263a;box-shadow:none}
+.pill.maybe{background:transparent;color:var(--warn);box-shadow:inset 0 0 0 1px var(--warn)}
+.rsteps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;counter-reset:rs}
+.rsteps li{counter-increment:rs;font-size:12px;color:var(--muted);padding-top:8px;border-top:3px solid var(--panel2);min-width:0}
+.rsteps li::before{content:counter(rs) ". "}
+.rsteps li.on{color:var(--fg);border-top-color:var(--sky)}
+.rsteps li.done{border-top-color:color-mix(in srgb,var(--sky) 45%,var(--panel2))}
+.tessbox{display:flex;flex-direction:column;gap:6px}
+.ask{background:var(--panel2);border:1px solid var(--warn);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.stat .s{font-size:12px;color:var(--muted)}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
 .stat{background:var(--panel2);border-radius:12px;padding:12px 14px}
 .stat .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
@@ -178,14 +191,20 @@ footer{color:var(--muted);font-size:12px;line-height:1.6}
       <h2>Range finder</h2>
       <button class="btn ghost" id="rReset">Start over</button>
     </div>
-    <p class="muted" id="rMsg">Step 1: slide down to the lowest note you can hold steadily for a moment. Any vowel works; "ah" is easiest.</p>
+    <ol class="rsteps" id="rSteps"><li data-s="lo">Lowest</li><li data-s="hi">Highest</li><li data-s="tess">Comfortable zone</li><li data-s="done">Results</li></ol>
+    <p id="rMsg">Step 1: slide down to the lowest note you can hold steadily for a moment. Any vowel works; "ah" is easiest. Vocal fry counts too.</p>
     <div class="steps">
-      <div class="step active" id="rStepLo"><div class="muted" style="font-size:12px">LOWEST HELD</div><div class="v" id="rLo">–</div><div class="muted mono" id="rLoHz" style="font-size:12px">&nbsp;</div></div>
-      <div class="step" id="rStepHi"><div class="muted" style="font-size:12px">HIGHEST HELD</div><div class="v" id="rHi">–</div><div class="muted mono" id="rHiHz" style="font-size:12px">&nbsp;</div></div>
+      <div class="step active" id="rStepLo"><div class="muted" style="font-size:12px">LOWEST HELD</div><div class="v" id="rLo">–</div><div class="reg" id="rLoReg">&nbsp;</div></div>
+      <div class="step" id="rStepHi"><div class="muted" style="font-size:12px">HIGHEST HELD</div><div class="v" id="rHi">–</div><div class="reg" id="rHiReg">&nbsp;</div></div>
     </div>
     <canvas class="trail" id="cRange"></canvas>
-    <div class="row"><span class="muted" style="font-size:13px">Holding now: <b class="mono" id="rNow" style="color:var(--fg)">–</b></span></div>
-    <div class="row"><button class="btn sky" id="rNext">Next: highest note</button></div>
+    <div class="row"><span class="muted" style="font-size:13px">Holding now: <b class="mono" id="rNow" style="color:var(--fg)">–</b></span> <span class="pill" id="rNowReg" hidden></span></div>
+    <div id="rTess" hidden class="tessbox">
+      <div class="timer"><i id="rTessBar"></i></div>
+      <p class="muted" id="rTessMsg" style="font-size:13px">Listening for 8 seconds of easy singing…</p>
+    </div>
+    <div id="rAsk" class="ask" hidden></div>
+    <div class="row"><button class="btn sky" id="rNext">Next: highest note</button><button class="btn ghost" id="rSkip" hidden>Skip this step</button></div>
     <div id="rResult" hidden style="display:flex;flex-direction:column;gap:12px">
       <canvas class="kbd" id="cKbd"></canvas>
       <p class="muted" id="rCap" style="font-size:13px"></p>
@@ -289,12 +308,13 @@ var VOICE_TYPES = [
   { name: 'contralto', lo: 53, hi: 77, about: 'the lowest female voice: rich and dark, around F3 to F5' },
   { name: 'mezzo-soprano', lo: 57, hi: 81, about: 'the middle female voice: warm with a strong middle register, around A3 to A5' },
   { name: 'soprano', lo: 60, hi: 84, about: 'the highest female voice: light and bright, around C4 to C6' }];
-function voiceTypeLikelihood(lo, hi) {
+function voiceTypeLikelihood(lo, hi, comfortCentre) {
+  var mid = comfortCentre != null ? comfortCentre : (lo + hi) / 2; // the comfortable zone is a better clue than the extremes
   var ranked = VOICE_TYPES.map(function (v) {
     var ov = Math.max(0, Math.min(hi, v.hi) - Math.max(lo, v.lo));
     var cover = ov / (v.hi - v.lo);           // how much of the type's range you reached
     var fitIn = ov / Math.max(1, hi - lo);    // how much of your range sits inside the type
-    var centre = 1 - Math.min(1, Math.abs((lo + hi) / 2 - (v.lo + v.hi) / 2) / 12);
+    var centre = 1 - Math.min(1, Math.abs(mid - (v.lo + v.hi) / 2) / 12);
     return { type: v, cover: cover, fitIn: fitIn, score: 0.4 * cover + 0.3 * fitIn + 0.3 * centre };
   }).sort(function (a, b) { return b.score - a.score; });
   var top = ranked[0], alts = ranked.slice(1).filter(function (r) { return r.score >= top.score * 0.85; }).slice(0, 2);
@@ -371,7 +391,7 @@ function pyinBand(x, sr, fmin, fmax, W) {
   cm[0] = 1; for (tau = 1; tau <= maxTau + 1; tau++) { run += d[tau]; cm[tau] = run > 0 ? d[tau] * tau / run : 1; }
   var tr = []; // troughs (local minima) in range
   for (tau = minTau; tau <= maxTau; tau++) if (cm[tau] < cm[tau - 1] && cm[tau] <= cm[tau + 1]) tr.push(tau);
-  if (!tr.length) return [];
+  if (!tr.length) { var none = []; none.cmMin = 1; return none; }
   var prob = new Float64Array(tr.length), gmin = 0;
   for (var k = 1; k < tr.length; k++) if (cm[tr[k]] < cm[tr[gmin]]) gmin = k;
   for (var t = 0; t < 100; t++) {
@@ -380,6 +400,7 @@ function pyinBand(x, sr, fmin, fmax, W) {
     if (hit >= 0) prob[hit] += PYIN_W[t]; else prob[gmin] += PYIN_W[t] * 0.01;
   }
   var out = [];
+  out.cmMin = cm[tr[gmin]]; // aperiodicity of the clearest dip: ~0 for a clean tone, higher when irregular
   for (k = 0; k < tr.length; k++) {
     if (prob[k] < 1e-4) continue;
     var b = tr[k], a = d[b - 1], m0 = d[b], c = d[b + 1], den = a - 2 * m0 + c, sh = den !== 0 ? 0.5 * (a - c) / den : 0;
@@ -421,7 +442,60 @@ function pyinCandidates(x, sr) {
   var all = lowKept.concat(hi.filter(function (c) { return c.m >= cut - 0.5; }).map(function (c) { return { m: c.m, p: c.p * hiScale }; }));
   var tot = 0; all.forEach(function (c) { tot += c.p; });
   if (tot > 1) all.forEach(function (c) { c.p /= tot; });
+  all.aperLow = lo.cmMin == null ? 1 : lo.cmMin;   // used to flag vocal fry
   return all;
+}
+
+// Overtone strength: power in harmonics 2-6 relative to the fundamental, measured with Goertzel
+// filters on the newest ~43 ms. Whistle register is close to a pure tone (very low value);
+// head voice and falsetto keep clear overtones.
+function harmonicRichness(x, sr, f0) {
+  var n = Math.min(x.length, Math.round(sr * 0.043)), off = x.length - n, pw = [];
+  for (var k = 1; k <= 6; k++) {
+    var f = f0 * k; if (f > sr * 0.45) break;
+    var w = 2 * Math.cos(2 * Math.PI * f / sr), s1 = 0, s2 = 0;
+    for (var i = 0; i < n; i++) {
+      var win = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1)), s0 = x[off + i] * win + w * s1 - s2; s2 = s1; s1 = s0;
+    }
+    pw.push(s1 * s1 + s2 * s2 - w * s1 * s2);
+  }
+  if (pw.length < 2 || pw[0] <= 0) return null;
+  var h = 0; for (k = 1; k < pw.length; k++) h += pw[k];
+  return h / pw[0];
+}
+
+// Register of one held note, from pitch plus two clues. Returns 'fry', 'whistle', 'normal',
+// or 'maybe-fry' / 'maybe-whistle' near the boundary, where the app asks the singer to confirm.
+function classifyRegister(m, rich, aperLow) {
+  if (m >= 81) { // A5 and up: whistle is possible
+    if (rich != null && rich < 0.01 && m >= 84) return 'whistle';
+    if (rich != null && rich < 0.05) return 'maybe-whistle';
+    return 'normal';
+  }
+  // below A2: clean chest voice measures ~0.1-0.2 aperiodicity, vocal fry ~0.5
+  if (m < 45 && aperLow > 0.45) return 'fry';
+  if (m < 45 && aperLow > 0.3) return 'maybe-fry';
+  if (m < 36) return 'maybe-fry';   // below C2 but regular: very rare outside fry (or a true "oktavist" bass)
+  return 'normal';
+}
+
+// Held note with its register clues. win entries: {t, m, rich, aper}
+function heldNoteInfo(win, now, holdMs) {
+  holdMs = holdMs || 500;
+  var m = heldNote(win, now, holdMs); if (m == null) return null;
+  var w = win.filter(function (s) { return s.t >= now - holdMs && s.m != null && Math.abs(s.m - m) <= 0.75; });
+  var rs = w.map(function (s) { return s.rich; }).filter(function (v) { return v != null; });
+  var ap = w.map(function (s) { return s.aper; }).filter(function (v) { return v != null; });
+  var rich = rs.length ? median(rs) : null, aper = ap.length ? median(ap) : 0;
+  return { m: m, rich: rich, aper: aper, register: classifyRegister(m, rich, aper) };
+}
+
+// Comfortable zone (tessitura): the middle of where someone actually sings when singing easily.
+// pitches: MIDI values of voiced frames from relaxed singing. Returns {lo, hi} (20th-80th percentile).
+function tessitura(pitches) {
+  if (pitches.length < 60) return null;
+  var s = pitches.slice().sort(function (a, b) { return a - b; });
+  return { lo: s[Math.floor(s.length * 0.2)], hi: s[Math.floor(s.length * 0.8)] };
 }
 
 // HMM over pitch bins (20 cents, C1..C8) x {voiced, unvoiced}; online Viterbi with a short
@@ -499,7 +573,7 @@ function heldNote(win, now, holdMs) {
   return near.length >= 0.75 * v.length ? median(near) : null;
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { pyinCandidates: pyinCandidates, PitchTracker: PitchTracker, yinDiff: yinDiff, pyinBand: pyinBand, voiceTypeLikelihood: voiceTypeLikelihood, yin: yin, rms: rms, f2m: f2m, m2f: m2f, noteName: noteName, scoreNote: scoreNote, heldNote: heldNote, guessVoiceType: guessVoiceType, median: median };
+if (typeof module !== 'undefined' && module.exports) module.exports = { harmonicRichness: harmonicRichness, classifyRegister: classifyRegister, heldNoteInfo: heldNoteInfo, tessitura: tessitura, pyinCandidates: pyinCandidates, PitchTracker: PitchTracker, yinDiff: yinDiff, pyinBand: pyinBand, voiceTypeLikelihood: voiceTypeLikelihood, yin: yin, rms: rms, f2m: f2m, m2f: m2f, noteName: noteName, scoreNote: scoreNote, heldNote: heldNote, guessVoiceType: guessVoiceType, median: median };
 
 // ---- App (browser only) ----
 (function () {
@@ -552,6 +626,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = { pyinCand
     eng.trail.push({ t: now, m: null });
     for (var k = 0; k < path.length && k < eng.trail.length; k++) eng.trail[eng.trail.length - path.length + k].m = path[k];
     var m = path[path.length - 1];
+    var last = eng.trail[eng.trail.length - 1];
+    last.aper = cands.aperLow;
+    last.rich = m != null && m >= 78 ? harmonicRichness(win, sr, m2f(m)) : null;
     while (eng.trail.length && eng.trail[0].t < now - 8000) eng.trail.shift();
     eng.subs.forEach(function (fn) { fn(m, now); });
     render(now);
@@ -666,7 +743,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = { pyinCand
     { id: 'mid', label: 'Middle (tenor, alto)', lo: 50, hi: 62 },
     { id: 'high', label: 'High (mezzo, soprano)', lo: 57, hi: 69 }];
   var savedRange = store.get('pitchlab.range');
-  if (savedRange) PRESETS.unshift({ id: 'mine', label: 'My range (' + noteName(savedRange.lo) + '–' + noteName(savedRange.hi) + ')', lo: Math.round(savedRange.lo) + 2, hi: Math.round(savedRange.hi) - 2 });
+  if (savedRange) PRESETS.unshift(savedRange.tlo != null ? { id: 'mine', label: 'My comfortable zone (' + noteName(savedRange.tlo) + '–' + noteName(savedRange.thi) + ')', lo: savedRange.tlo, hi: savedRange.thi } : { id: 'mine', label: 'My range (' + noteName(savedRange.lo) + '–' + noteName(savedRange.hi) + ')', lo: Math.round(savedRange.lo) + 2, hi: Math.round(savedRange.hi) - 2 });
   var preset = PRESETS[0].id === 'mine' ? 'mine' : 'mid';
   function drawPresets() {
     var row = $('presetRow'); row.querySelectorAll('.chip').forEach(function (c) { c.remove(); });
@@ -766,71 +843,151 @@ if (typeof module !== 'undefined' && module.exports) module.exports = { pyinCand
   }
 
   // ---------- range finder ----------
-  var rng = { step: 'lo', lo: null, hi: null };
+  // Two ranges from one test: ABSOLUTE counts every held note, vocal fry and whistle included;
+  // USABLE keeps chest, mix and head voice/falsetto only. Step 3 measures the comfortable zone.
+  var REG = { fry: ['vocal fry', 'fry'], 'maybe-fry': ['fry?', 'maybe'], whistle: ['whistle', 'whistle'], 'maybe-whistle': ['whistle?', 'maybe'], normal: ['singing voice', ''] };
+  var rng;
+  function rngReset() {
+    rng = { step: 'lo', held: [], conf: { fry: null, whistle: null }, tessPts: [], tessT0: 0 };
+    $('rNext').hidden = false; $('rNext').textContent = 'Next: highest note'; $('rSkip').hidden = true;
+    $('rResult').hidden = true; $('rTess').hidden = true; $('rAsk').hidden = true;
+    $('rMsg').textContent = 'Step 1: slide down to the lowest note you can hold steadily for a moment. Any vowel works; "ah" is easiest. Vocal fry counts too.';
+    setRangeUI();
+  }
+  function effReg(r) {
+    if (r === 'maybe-fry' && rng.conf.fry != null) return rng.conf.fry ? 'fry' : 'normal';
+    if (r === 'maybe-whistle' && rng.conf.whistle != null) return rng.conf.whistle ? 'whistle' : 'normal';
+    return r;
+  }
+  function addHeld(h) {
+    var n = Math.round(h.m), ex = null;
+    rng.held.forEach(function (x) { if (x.n === n) ex = x; });
+    if (ex) { ex.m = h.m; ex.reg = h.register; } else rng.held.push({ n: n, m: h.m, reg: h.register });
+  }
+  function ranges() {
+    var abs = rng.held.slice().sort(function (p, q) { return p.n - q.n; });
+    var use = abs.filter(function (x) { var r = effReg(x.reg); return r !== 'fry' && r !== 'whistle'; });
+    return { aLo: abs[0], aHi: abs[abs.length - 1], uLo: use[0], uHi: use[use.length - 1], all: abs };
+  }
+  function pill(reg) { var r = REG[effReg(reg)]; return '<span class="pill ' + r[1] + '">' + r[0] + '</span>'; }
   eng.subs.push(function (m, now) {
-    if (tab !== 'range' || rng.step === 'done') return;
-    var h = heldNote(eng.trail, now, 500);
-    $('rNow').textContent = h != null ? noteName(h) : '–';
-    if (h == null) return;
-    if (rng.step === 'lo' && (rng.lo == null || h < rng.lo)) { rng.lo = h; setRangeUI(); }
-    if (rng.step === 'hi' && (rng.hi == null || h > rng.hi)) { rng.hi = h; setRangeUI(); }
+    if (tab !== 'range' || !rng) return;
+    if (rng.step === 'lo' || rng.step === 'hi') {
+      var h = heldNoteInfo(eng.trail, now, 500);
+      $('rNow').textContent = h ? noteName(h.m) : '–';
+      $('rNowReg').hidden = !h || h.register === 'normal';
+      if (h) { $('rNowReg').className = 'pill ' + REG[h.register][1]; $('rNowReg').textContent = REG[h.register][0]; addHeld(h); setRangeUI(); }
+    } else if (rng.step === 'tess') {
+      if (m != null) rng.tessPts.push(m);
+      var p = Math.min(1, rng.tessPts.length / 480); // ~8 s of voiced frames at 60 per second
+      $('rTessBar').style.width = (p * 100) + '%';
+      $('rTessMsg').textContent = p < 1 ? 'Heard ' + (rng.tessPts.length / 60).toFixed(1) + ' of 8 seconds of singing. Keep going, nice and easy.' : 'Got it.';
+      if (p >= 1) finishTess();
+    }
   });
   function setRangeUI() {
-    $('rLo').textContent = rng.lo != null ? noteName(rng.lo) : '–'; $('rLoHz').textContent = rng.lo != null ? m2f(rng.lo).toFixed(0) + ' Hz' : ' ';
-    $('rHi').textContent = rng.hi != null ? noteName(rng.hi) : '–'; $('rHiHz').textContent = rng.hi != null ? m2f(rng.hi).toFixed(0) + ' Hz' : ' ';
+    var R = ranges();
+    $('rLo').textContent = R.aLo ? noteName(R.aLo.n) : '–'; $('rLoReg').innerHTML = R.aLo ? m2f(R.aLo.m).toFixed(0) + ' Hz ' + pill(R.aLo.reg) : '&nbsp;';
+    $('rHi').textContent = R.aHi ? noteName(R.aHi.n) : '–'; $('rHiReg').innerHTML = R.aHi ? m2f(R.aHi.m).toFixed(0) + ' Hz ' + pill(R.aHi.reg) : '&nbsp;';
     $('rStepLo').classList.toggle('active', rng.step === 'lo'); $('rStepHi').classList.toggle('active', rng.step === 'hi');
+    var order = ['lo', 'hi', 'tess', 'done'], at = order.indexOf(rng.step === 'ask' ? 'done' : rng.step);
+    document.querySelectorAll('#rSteps li').forEach(function (li, i) { li.className = i === at ? 'on' : i < at ? 'done' : ''; });
   }
   $('rNext').onclick = async function () {
     if (!eng.on && !(await startMic())) return;
+    var R = ranges();
     if (rng.step === 'lo') {
-      if (rng.lo == null) { $('rMsg').textContent = 'No held note yet. Sing a low note and hold it for about a second.'; return; }
-      rng.step = 'hi'; $('rNext').textContent = 'Finish'; $('rMsg').textContent = 'Step 2: now slide up to the highest note you can hold steadily. Falsetto and head voice count.'; view.c = rng.lo + 12;
+      if (!R.aLo) { $('rMsg').textContent = 'No held note yet. Sing a low note and hold it for about a second.'; return; }
+      rng.step = 'hi'; $('rNext').textContent = 'Next: comfortable zone';
+      $('rMsg').textContent = 'Step 2: now slide up to the highest note you can hold steadily. Falsetto, head voice and whistle all count.'; view.c = R.aLo.m + 12;
     } else if (rng.step === 'hi') {
-      if (rng.hi == null) { $('rMsg').textContent = 'No high note held yet. Slide up and hold for about a second.'; return; }
-      rng.step = 'done'; $('rNext').hidden = true; showRange();
+      if (!R.aHi || R.aHi.n - R.aLo.n < 2) { $('rMsg').textContent = 'No high note held yet. Slide up and hold for about a second.'; return; }
+      rng.step = 'tess'; rng.tessPts = []; $('rTess').hidden = false; $('rSkip').hidden = false; $('rNext').hidden = true; $('rNowReg').hidden = true; $('rNow').textContent = '–';
+      $('rMsg').textContent = 'Step 3: sing something easy for about 8 seconds, like a song you know well or a relaxed "la la la", wherever it feels most comfortable. Don\'t push high or low.';
+      $('rTessBar').style.width = '0%';
     }
     setRangeUI();
   };
-  $('rReset').onclick = function () { rng = { step: 'lo', lo: null, hi: null }; $('rNext').hidden = false; $('rNext').textContent = 'Next: highest note'; $('rResult').hidden = true; $('rMsg').textContent = 'Step 1: slide down to the lowest note you can hold steadily for a moment. Any vowel works; "ah" is easiest.'; setRangeUI(); };
-  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
-  function showRange() {
-    var lo = Math.round(rng.lo), hi = Math.round(rng.hi), span = hi - lo, vl = voiceTypeLikelihood(lo, hi), vt = vl.likely;
-    store.set('pitchlab.range', { lo: lo, hi: hi });
-    $('rMsg').textContent = 'Done. Your range is saved and Pitch match can now use it.';
-    $('rStats').innerHTML = [
-      ['Range', noteName(lo) + ' – ' + noteName(hi)], ['Span', span + ' semitones'], ['Octaves', (span / 12).toFixed(1)], ['Most likely', cap(vt.name)]
-    ].map(function (s) { return '<div class="stat"><div class="k">' + s[0] + '</div><div class="v">' + s[1] + '</div></div>'; }).join('');
-    var html = '<h3>You are most likely a ' + vt.name + '</h3><p>A ' + vt.name + ' is ' + vt.about + '. ' + (vl.fit === 'good' ? 'Your range of ' + noteName(lo) + ' to ' + noteName(hi) + ' fits that well.' : vl.fit === 'wide' ? 'Your range of ' + noteName(lo) + ' to ' + noteName(hi) + ' is wider than any single voice type, and its middle sits closest to a ' + vt.name + '.' : 'Your range of ' + noteName(lo) + ' to ' + noteName(hi) + ' overlaps most with a ' + vt.name + ', though not completely.') + '</p>';
-    if (vl.possible.length) html += '<p>' + vl.possible.map(function (v) { return cap(v.name); }).join(' or ') + (vl.possible.length > 1 ? ' are' : ' is') + ' also possible: ' + vl.possible.map(function (v) { return 'a ' + v.name + ' is ' + v.about; }).join('; ') + '.</p>';
-    vl.notes.forEach(function (n) { html += '<p>' + n + '</p>'; });
-    html += '<p class="muted">This is a likelihood, not a final answer. Range is only one clue: voice type also depends on where your voice feels most comfortable, where it shifts between registers, and its tone colour. Later tests in the app will measure those.</p>';
-    $('rType').innerHTML = html;
-    $('rCap').textContent = 'Blue keys: your range. Orange bar: typical ' + vt.name + ' range (' + noteName(vt.lo) + '–' + noteName(vt.hi) + ').';
-    $('rResult').hidden = false; drawKeyboard(lo, hi, vt);
+  $('rSkip').onclick = function () { if (rng.step === 'tess') finishTess(true); };
+  $('rReset').onclick = rngReset;
+  function finishTess(skipped) {
+    if (rng.step !== 'tess') return;
+    rng.tessSkipped = !!skipped || rng.tessPts.length < 120;
+    rng.step = 'ask'; $('rTess').hidden = true; $('rSkip').hidden = true; setRangeUI(); askNext();
   }
-  function drawKeyboard(lo, hi, vt) {
-    var cv = $('cKbd'), F = fit(cv), g = F.g, w = F.w, h = F.h, from = 24, to = 108; // C1..C8, the range the detector covers
+  // Near the boundary the clues can't be sure, so ask the singer.
+  function askNext() {
+    var R = ranges(), mf = R.all.filter(function (x) { return x.reg === 'maybe-fry'; }), mw = R.all.filter(function (x) { return x.reg === 'maybe-whistle'; });
+    var q = null;
+    if (mf.length && rng.conf.fry == null) q = { key: 'fry', notes: mf, text: 'Some of your low notes (' + span(mf) + ') could have been vocal fry, the creaky, rattling sound below your normal voice. Were they?', yes: 'Yes, that was fry', no: 'No, my normal voice' };
+    else if (mw.length && rng.conf.whistle == null) q = { key: 'whistle', notes: mw, text: 'Some of your high notes (' + span(mw) + ') were very pure, almost like a flute. Was that whistle register?', yes: 'Yes, whistle', no: 'No, head voice or falsetto' };
+    if (!q) { $('rAsk').hidden = true; showRange(); return; }
+    $('rMsg').textContent = 'One quick question before your results.';
+    $('rAsk').innerHTML = '<p>' + q.text + '</p><div class="row"><button class="btn sky" id="rYes">' + q.yes + '</button><button class="btn ghost" id="rNo">' + q.no + '</button></div>';
+    $('rAsk').hidden = false;
+    $('rYes').onclick = function () { rng.conf[q.key] = true; askNext(); };
+    $('rNo').onclick = function () { rng.conf[q.key] = false; askNext(); };
+  }
+  function span(list) { var a = list[0].n, b = list[list.length - 1].n; return a === b ? noteName(a) : noteName(a) + '–' + noteName(b); }
+  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+  function label(x) { var r = effReg(x.reg); return noteName(x.n) + (r === 'fry' ? ' (fry)' : r === 'whistle' ? ' (whistle)' : ''); }
+  function showRange() {
+    rng.step = 'done'; setRangeUI(); $('rNext').hidden = true;
+    var R = ranges();
+    if (!R.uLo || !R.uHi || R.uHi.n <= R.uLo.n) {
+      $('rMsg').textContent = 'All the notes you held were vocal fry or whistle, so there is no singing range to show yet. Press Start over and include some notes in your normal voice.';
+      return;
+    }
+    var uLo = R.uLo.n, uHi = R.uHi.n, uspan = uHi - uLo;
+    var pts = rng.tessPts.filter(function (m) { return m >= uLo - 0.5 && m <= uHi + 0.5; });
+    var T = rng.tessSkipped ? null : tessitura(pts), est = !T;
+    if (!T) T = { lo: uLo + uspan * 0.25, hi: uLo + uspan * 0.7 };
+    var tLo = Math.round(T.lo), tHi = Math.max(Math.round(T.hi), tLo + 1);
+    var vl = voiceTypeLikelihood(uLo, uHi, (tLo + tHi) / 2), vt = vl.likely;
+    store.set('pitchlab.range', { lo: uLo, hi: uHi, tlo: tLo, thi: tHi, alo: R.aLo.n, ahi: R.aHi.n });
+    $('rMsg').textContent = 'Done. Your ranges are saved, and Pitch match can now use your comfortable zone.';
+    $('rStats').innerHTML = [
+      ['Absolute range', label(R.aLo) + ' – ' + label(R.aHi), 'every steady note, fry and whistle included'],
+      ['Usable range', noteName(uLo) + ' – ' + noteName(uHi), uspan + ' semitones (' + (uspan / 12).toFixed(1) + ' octaves), chest to head voice'],
+      ['Comfortable zone', noteName(tLo) + ' – ' + noteName(tHi), est ? 'estimated from your usable range' : 'measured from your easy singing'],
+      ['Most likely', cap(vt.name), 'from usable range and comfortable zone']
+    ].map(function (s) { return '<div class="stat"><div class="k">' + s[0] + '</div><div class="v">' + s[1] + '</div><div class="s">' + s[2] + '</div></div>'; }).join('');
+    var html = '<h3>You are most likely a ' + vt.name + '</h3><p>A ' + vt.name + ' is ' + vt.about + '. ' + (vl.fit === 'good' ? 'Your usable range of ' + noteName(uLo) + ' to ' + noteName(uHi) + ' fits that well.' : vl.fit === 'wide' ? 'Your usable range of ' + noteName(uLo) + ' to ' + noteName(uHi) + ' is wider than any single voice type, and its middle sits closest to a ' + vt.name + '.' : 'Your usable range of ' + noteName(uLo) + ' to ' + noteName(uHi) + ' overlaps most with a ' + vt.name + ', though not completely.') + '</p>';
+    if (vl.possible.length) html += '<p>' + vl.possible.map(function (v) { return cap(v.name); }).join(' or ') + (vl.possible.length > 1 ? ' are' : ' is') + ' also possible: ' + vl.possible.map(function (v) { return 'a ' + v.name + ' is ' + v.about; }).join('; ') + '.</p>';
+    html += '<p>Your comfortable zone, ' + noteName(tLo) + ' to ' + noteName(tHi) + (est ? ' (an estimate, since step 3 was skipped)' : '') + ', is where songs and exercises will feel easiest. Pick songs whose melody stays mostly inside it.</p>';
+    if (effReg(R.aLo.reg) === 'fry' || effReg(R.aHi.reg) === 'whistle') html += '<p class="muted">Vocal fry and whistle notes count toward your absolute range but not your usable range, because they are special effects rather than notes you can sing words on.</p>';
+    vl.notes.forEach(function (n) { html += '<p>' + n + '</p>'; });
+    html += '<p class="muted">This is a likelihood, not a final answer. Voice type also depends on where your voice shifts between registers and on its tone colour, which later tests will measure.</p>';
+    $('rType').innerHTML = html;
+    $('rCap').textContent = 'Light blue: absolute range. Blue: usable range. Orange underline: comfortable zone. Grey bar: typical ' + vt.name + ' range (' + noteName(vt.lo) + '–' + noteName(vt.hi) + ').';
+    $('rResult').hidden = false; drawKeyboard(R.aLo.n, R.aHi.n, uLo, uHi, tLo, tHi, vt);
+  }
+  function drawKeyboard(aLo, aHi, uLo, uHi, tLo, tHi, vt) {
+    var cv = $('cKbd'), F = fit(cv), g = F.g, w = F.w, h = F.h, from = 24, to = 108; // C1..C8
     var whites = []; for (var n = from; n <= to; n++) if ([1, 3, 6, 8, 10].indexOf(n % 12) < 0) whites.push(n);
-    var kw = w / whites.length; g.clearRect(0, 0, w, h);
+    var kw = w / whites.length, top = 14, kh = h - 36; g.clearRect(0, 0, w, h);
+    var col = function (n) { return n >= uLo && n <= uHi ? C.sky : n >= aLo && n <= aHi ? hexA(C.sky, 0.45) : C.fg; };
     whites.forEach(function (n, i) {
-      g.fillStyle = n >= lo && n <= hi ? C.sky : C.fg; g.globalAlpha = n >= lo && n <= hi ? 1 : 0.85;
-      g.fillRect(i * kw + 0.5, 14, kw - 1, h - 30); g.globalAlpha = 1;
-      if (n % 12 === 0) { g.fillStyle = C.muted; g.font = '10px ' + css.getPropertyValue('--mono'); g.fillText(noteName(n), i * kw + 2, h - 6); }
+      g.globalAlpha = n >= aLo && n <= aHi ? 1 : 0.85; g.fillStyle = col(n); g.fillRect(i * kw + 0.5, top, kw - 1, kh); g.globalAlpha = 1;
+      if (n >= tLo && n <= tHi) { g.fillStyle = C.coral; g.fillRect(i * kw + 0.5, top + kh + 3, kw - 1, 4); }
+      if (n % 12 === 0) { g.fillStyle = C.muted; g.font = '10px ' + css.getPropertyValue('--mono'); g.fillText(noteName(n), i * kw + 2, h - 4); }
     });
     whites.forEach(function (n, i) {
-      if ([0, 2, 5, 7, 9].indexOf(n % 12) >= 0 && n + 1 <= to) {
-        g.fillStyle = n + 1 >= lo && n + 1 <= hi ? '#2f86b8' : C.bg; g.fillRect((i + 1) * kw - kw * 0.3, 14, kw * 0.6, (h - 30) * 0.6);
+      var b = n + 1;
+      if ([0, 2, 5, 7, 9].indexOf(n % 12) >= 0 && b <= to) {
+        g.fillStyle = b >= uLo && b <= uHi ? '#2f86b8' : b >= aLo && b <= aHi ? '#3d5f80' : C.bg; g.fillRect((i + 1) * kw - kw * 0.3, top, kw * 0.6, kh * 0.6);
       }
     });
-    var vx0 = whites.indexOf(vt.lo) >= 0 ? whites.indexOf(vt.lo) * kw : 0, vx1 = whites.indexOf(vt.hi) >= 0 ? (whites.indexOf(vt.hi) + 1) * kw : w;
-    g.fillStyle = C.coral; g.fillRect(vx0, 4, vx1 - vx0, 5);
+    var x0 = whites.indexOf(vt.lo) >= 0 ? whites.indexOf(vt.lo) * kw : 0, x1 = whites.indexOf(vt.hi) >= 0 ? (whites.indexOf(vt.hi) + 1) * kw : w;
+    g.fillStyle = C.muted; g.fillRect(x0, 4, x1 - x0, 5);
   }
   function renderRange(now) {
-    var w = liveWindow(now, 10), marks = [];
-    if (rng.lo != null) marks.push({ m: rng.lo, color: C.sky, label: 'low ' + noteName(rng.lo) });
-    if (rng.hi != null) marks.push({ m: rng.hi, color: C.coral, label: 'high ' + noteName(rng.hi) });
+    var w = liveWindow(now, 10), marks = [], R = rng ? ranges() : {};
+    if (R.aLo) marks.push({ m: R.aLo.m, color: C.sky, label: 'low ' + label(R.aLo) });
+    if (R.aHi && R.aHi !== R.aLo) marks.push({ m: R.aHi.m, color: C.coral, label: 'high ' + label(R.aHi) });
     drawTrail($('cRange'), eng.trail, Object.assign(w, { marks: marks }));
   }
+  rngReset();
 
   // ---------- offline analysis (file + demo) ----------
   var fileTrace = null, fileName = '';
