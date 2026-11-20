@@ -205,7 +205,7 @@ footer{color:var(--muted);font-size:12px;line-height:1.6}
   </section>
 
   <footer>
-    Pitch detection: two-pass YIN on raw microphone audio (echo cancellation and noise suppression off), median-smoothed, about 60 readings a second. Covers C1 to C8; on synthetic test voices it stays within 1 cent from C1 to C5 and within 6 cents up to C8. Real-world limits: many phone mics barely pick up notes below about E1, and above C6 only whistle register reaches. Use headphones or a quiet room; the mic is muted while reference notes play.
+    Pitch detection: pYIN (probabilistic YIN) with HMM tracking on raw microphone audio (echo cancellation, noise suppression and auto gain all off), about 60 readings a second. Low notes use a ~100 ms window plus the loudness envelope, so steady vocal fry draws a continuous line down to C1. On synthetic test voices it stays within 1 cent from C1 to C7 and 5 cents up to C8. Many phone mics barely pick up notes below about E1, and very irregular fry can still break up. Use headphones or a quiet room; the mic is muted while reference notes play.
   </footer>
 </div>
 
@@ -279,32 +279,6 @@ function scoreNote(samples, target) {
 }
 function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 
-// Held-note detector for range finding: a note counts once pitch has stayed within
-// ~0.3 semitone (std) for holdMs with no gap longer than 120 ms.
-function heldNote(win, now, holdMs) {
-  holdMs = holdMs || 600;
-  var w = win.filter(function (s) { return s.t >= now - holdMs; });
-  if (!w.length || w[0].t > now - holdMs + 80) return null;
-  for (var i = 0; i < w.length; i++) { if (w[i].m == null) return null; if (i && w[i].t - w[i - 1].t > 120) return null; }
-  var ms = w.map(function (s) { return s.m; });
-  return stdev(ms) < 0.3 ? median(ms) : null;
-}
-
-// Wide-range detector, C1 (32.7 Hz) to C8 (4186 Hz).
-// Pass 1: YIN on the newest ~43 ms at full rate, 60-4400 Hz (fast reaction, sub-cent resolution for high notes).
-// Pass 2: YIN on the whole buffer (needs >= ~85 ms) decimated to ~11-12 kHz, 30-300 Hz. Low notes need a window
-// at least 2-3 periods long, which pass 1 cannot see. Pass 2's first dip can only land under 75 Hz when the pitch
-// really is that low, so it wins only there.
-function detectPitch(x, sr) {
-  var mainLen = Math.min(x.length, Math.round(sr * 0.043));
-  var main = yin(x.subarray(x.length - mainLen), sr, 60, 4400, 0.15);
-  var D = Math.max(1, Math.floor(sr / 11025)), n = Math.floor(x.length / D), dec = new Float32Array(n);
-  for (var i = 0; i < n; i++) { var s = 0; for (var k = 0; k < D; k++) s += x[i * D + k]; dec[i] = s / D; }
-  var low = n > 2 * (sr / D / 30) ? yin(dec, sr / D, 30, 300, 0.15) : null;
-  if (low && low.confidence > 0.8 && low.freq < 75) return low;
-  if (main && main.confidence > 0.8) return main;
-  return null;
-}
 
 // Voice type as a likelihood, never a verdict. Typical comfortable classical ranges (MIDI).
 var VOICE_TYPES = [
@@ -332,7 +306,200 @@ function voiceTypeLikelihood(lo, hi) {
 }
 function guessVoiceType(lo, hi) { return voiceTypeLikelihood(lo, hi).likely; }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { detectPitch: detectPitch, voiceTypeLikelihood: voiceTypeLikelihood, yin: yin, rms: rms, f2m: f2m, m2f: m2f, noteName: noteName, scoreNote: scoreNote, heldNote: heldNote, guessVoiceType: guessVoiceType, median: median };
+
+// ======================= pYIN (probabilistic YIN) + HMM tracking =======================
+// Mauch & Dixon 2014. Instead of one threshold (YIN), every dip of the normalised difference
+// function becomes a pitch candidate with a probability; an HMM then picks the most plausible
+// continuous path. Weak or slightly irregular periods (steady vocal fry, breathy notes) keep
+// a little probability instead of being thrown away, and the tracker bridges them into a line.
+
+// --- small radix-2 FFT (portable, no dependencies) ---
+var _fftCache = {};
+function _fftTables(n) {
+  if (_fftCache[n]) return _fftCache[n];
+  var rev = new Uint32Array(n), bits = Math.log2(n) | 0;
+  for (var i = 0; i < n; i++) { var r = 0, v = i; for (var b = 0; b < bits; b++) { r = (r << 1) | (v & 1); v >>= 1; } rev[i] = r; }
+  var cos = new Float64Array(n / 2), sin = new Float64Array(n / 2);
+  for (i = 0; i < n / 2; i++) { cos[i] = Math.cos(2 * Math.PI * i / n); sin[i] = -Math.sin(2 * Math.PI * i / n); }
+  return (_fftCache[n] = { rev: rev, cos: cos, sin: sin });
+}
+function fft(re, im, inverse) {
+  var n = re.length, t = _fftTables(n), i, j;
+  for (i = 0; i < n; i++) { j = t.rev[i]; if (j > i) { var a = re[i]; re[i] = re[j]; re[j] = a; a = im[i]; im[i] = im[j]; im[j] = a; } }
+  for (var size = 2; size <= n; size <<= 1) {
+    var half = size >> 1, step = n / size;
+    for (i = 0; i < n; i += size) for (var k = 0; k < half; k++) {
+      var wr = t.cos[k * step], wi = inverse ? -t.sin[k * step] : t.sin[k * step];
+      var p = i + k, q = p + half, xr = re[q] * wr - im[q] * wi, xi = re[q] * wi + im[q] * wr;
+      re[q] = re[p] - xr; im[q] = im[p] - xi; re[p] += xr; im[p] += xi;
+    }
+  }
+  if (inverse) for (i = 0; i < n; i++) { re[i] /= n; im[i] /= n; }
+}
+
+// YIN difference function d(tau) for tau in [0, maxTau], window W, computed with an FFT
+// (cross-correlation) so long low-note windows stay cheap on phones.
+function yinDiff(x, W, maxTau) {
+  var N = W + maxTau + 1, M = 1; while (M < N + W) M <<= 1;
+  var ar = new Float64Array(M), ai = new Float64Array(M), br = new Float64Array(M), bi = new Float64Array(M), i;
+  for (i = 0; i < W; i++) ar[i] = x[i];
+  for (i = 0; i < N; i++) br[i] = x[i];
+  fft(ar, ai, false); fft(br, bi, false);
+  for (i = 0; i < M; i++) { var r = ar[i] * br[i] + ai[i] * bi[i], im = ar[i] * bi[i] - ai[i] * br[i]; ar[i] = r; ai[i] = im; }
+  fft(ar, ai, true); // ar[tau] = sum_j x[j] x[j+tau], j < W
+  var cs = new Float64Array(N + 1); for (i = 0; i < N; i++) cs[i + 1] = cs[i] + x[i] * x[i];
+  var e0 = cs[W], d = new Float64Array(maxTau + 2);
+  for (var tau = 0; tau <= maxTau + 1 && tau + W <= N; tau++) { var v = e0 + (cs[tau + W] - cs[tau]) - 2 * ar[tau]; d[tau] = v > 0 ? v : 0; }
+  return d;
+}
+
+// Beta(2,18) prior over 100 thresholds 0.01..1.00 (pYIN default, mean 0.1)
+var PYIN_THR = [], PYIN_W = [];
+// Mixed with a broader Beta(2,6) (mean 0.25) at 25% weight so slightly irregular voices (vocal fry,
+// breathy tones) keep some probability instead of only the 1% "no dip" fallback.
+(function () {
+  var a = [], b = [], sa = 0, sb = 0, i;
+  for (i = 1; i <= 100; i++) { var t = i / 100; PYIN_THR.push(t); a.push(t * Math.pow(1 - t, 17)); b.push(t * Math.pow(1 - t, 5)); sa += a[i - 1]; sb += b[i - 1]; }
+  for (i = 0; i < 100; i++) PYIN_W.push(0.75 * a[i] / sa + 0.25 * b[i] / sb);
+})();
+
+// pYIN candidates from one analysis window. Returns [{m (MIDI), p}] with sum(p) <= 1.
+function pyinBand(x, sr, fmin, fmax, W) {
+  var maxTau = Math.min(Math.floor(sr / fmin), x.length - W - 2), minTau = Math.max(2, Math.floor(sr / fmax));
+  if (maxTau <= minTau + 2) return [];
+  var d = yinDiff(x, W, maxTau), cm = new Float64Array(maxTau + 2), run = 0, tau;
+  cm[0] = 1; for (tau = 1; tau <= maxTau + 1; tau++) { run += d[tau]; cm[tau] = run > 0 ? d[tau] * tau / run : 1; }
+  var tr = []; // troughs (local minima) in range
+  for (tau = minTau; tau <= maxTau; tau++) if (cm[tau] < cm[tau - 1] && cm[tau] <= cm[tau + 1]) tr.push(tau);
+  if (!tr.length) return [];
+  var prob = new Float64Array(tr.length), gmin = 0;
+  for (var k = 1; k < tr.length; k++) if (cm[tr[k]] < cm[tr[gmin]]) gmin = k;
+  for (var t = 0; t < 100; t++) {
+    var s = PYIN_THR[t], hit = -1;
+    for (k = 0; k < tr.length; k++) if (cm[tr[k]] < s) { hit = k; break; }
+    if (hit >= 0) prob[hit] += PYIN_W[t]; else prob[gmin] += PYIN_W[t] * 0.01;
+  }
+  var out = [];
+  for (k = 0; k < tr.length; k++) {
+    if (prob[k] < 1e-4) continue;
+    var b = tr[k], a = d[b - 1], m0 = d[b], c = d[b + 1], den = a - 2 * m0 + c, sh = den !== 0 ? 0.5 * (a - c) / den : 0;
+    if (Math.abs(sh) > 1) sh = 0;
+    out.push({ m: f2m(sr / (b + sh)), p: prob[k] });
+  }
+  return out;
+}
+
+// Three views so every register gets a suitable window:
+//  high: newest ~43 ms at full rate, 60-4800 Hz (fast, precise for high notes)
+//  low:  newest ~100 ms decimated to ~11-12 kHz, 30-150 Hz (2-3 periods of C1)
+//  envelope: the amplitude envelope of that same 100 ms, 30-150 Hz. Vocal fry is a train of
+//    separate glottal pulses whose fine waveform decorrelates from pulse to pulse (jitter), but
+//    whose loudness envelope still repeats at the pulse rate, which is the pitch you hear.
+// x must hold at least ~110 ms of audio.
+function pyinCandidates(x, sr) {
+  var hiLen = Math.min(x.length, Math.round(sr * 0.043)), hiW = Math.round(sr * 0.022);
+  var hi = pyinBand(x.subarray(x.length - hiLen), sr, 60, 4800, hiW);
+  var loLen = Math.min(x.length, Math.round(sr * 0.1)), D = Math.max(1, Math.floor(sr / 11025)), n = Math.floor(loLen / D);
+  var off = x.length - n * D, dec = new Float32Array(n), i, k;
+  for (i = 0; i < n; i++) { var s = 0; for (k = 0; k < D; k++) s += x[off + i * D + k]; dec[i] = s / D; }
+  var lsr = sr / D;
+  var lo = pyinBand(dec, lsr, 30, 150, Math.round(lsr * 0.066));
+  // envelope: rectify, smooth (~200 Hz one-pole), decimate x4, remove mean
+  var a = Math.exp(-2 * Math.PI * 200 / lsr), y = 0, ne = Math.floor(n / 4), env = new Float32Array(ne), mean = 0;
+  for (i = 0; i < ne * 4; i++) { y = a * y + (1 - a) * Math.abs(dec[i]); if ((i & 3) === 3) { env[i >> 2] = y; mean += y; } }
+  mean /= ne || 1; for (i = 0; i < ne; i++) env[i] -= mean;
+  var esr = lsr / 4, en = pyinBand(env, esr, 30, 150, Math.round(esr * 0.066));
+  var cut = f2m(75), low = [];
+  lo.concat(en).forEach(function (c) { if (c.m < cut) low.push(c); });
+  // keep the stronger of duplicate low candidates (same 20-cent bin)
+  low.sort(function (p, q) { return q.p - p.p; });
+  var lowKept = []; low.forEach(function (c) { if (!lowKept.some(function (q) { return Math.abs(q.m - c.m) < 0.3; })) lowKept.push(c); });
+  var pl = 0, ph = 0; lowKept.forEach(function (c) { pl += c.p; }); hi.forEach(function (c) { ph += c.p; });
+  // when the slow views clearly see a low pulse rate and the fast view is unsure, the fast view is
+  // most likely locking onto formant ringing inside each pulse: turn it down
+  var hiScale = pl > 0.15 && pl > 2 * ph ? 0.2 : 1;
+  var all = lowKept.concat(hi.filter(function (c) { return c.m >= cut - 0.5; }).map(function (c) { return { m: c.m, p: c.p * hiScale }; }));
+  var tot = 0; all.forEach(function (c) { tot += c.p; });
+  if (tot > 1) all.forEach(function (c) { c.p /= tot; });
+  return all;
+}
+
+// HMM over pitch bins (20 cents, C1..C8) x {voiced, unvoiced}; online Viterbi with a short
+// fixed-lag backtrack so the line drawn on screen can be corrected a few frames back.
+function PitchTracker(opt) {
+  opt = opt || {};
+  this.lo = opt.lo || 24; this.hi = opt.hi || 108; this.res = opt.res || 0.2;
+  this.nb = Math.round((this.hi - this.lo) / this.res) + 1;
+  this.J = opt.maxJump || 15;              // max bins moved per frame (3 semitones per ~16 ms)
+  this.lag = opt.lag || 8;
+  var stay = opt.stay || 0.99;
+  this.lStay = Math.log(stay); this.lSw = Math.log(1 - stay);
+  var s = 0, k; this.lTri = new Float64Array(2 * this.J + 1);
+  for (k = -this.J; k <= this.J; k++) s += this.J + 1 - Math.abs(k);
+  for (k = -this.J; k <= this.J; k++) this.lTri[k + this.J] = Math.log((this.J + 1 - Math.abs(k)) / s);
+  this.V = new Float64Array(this.nb); this.U = new Float64Array(this.nb);
+  this.bp = []; this.cands = []; this.started = false;
+}
+PitchTracker.prototype.push = function (cands) {
+  var nb = this.nb, J = this.J, lo = this.lo, res = this.res, i, j;
+  var obs = new Float64Array(nb), tot = 0;
+  for (i = 0; i < cands.length; i++) {
+    var c = cands[i]; if (c.m < lo - 0.5 || c.m > this.hi + 0.5) continue;
+    var b = Math.round((c.m - lo) / res); tot += c.p;
+    for (j = -1; j <= 1; j++) { var bb = b + j; if (bb >= 0 && bb < nb) obs[bb] += c.p * (j === 0 ? 0.6 : 0.2); }
+  }
+  var lu = Math.log(Math.max(1e-12, (1 - Math.min(1, tot)) / nb));
+  var V2 = new Float64Array(nb), U2 = new Float64Array(nb), bpf = new Int32Array(2 * nb), best = -Infinity;
+  for (i = 0; i < nb; i++) {
+    var lv = Math.log(obs[i] + 1e-5 / nb);
+    if (!this.started) { V2[i] = lv; U2[i] = lu; bpf[i] = i; bpf[nb + i] = nb + i; continue; }
+    var bv = -Infinity, bvi = 0, bu = -Infinity, bui = 0;
+    var j0 = Math.max(0, i - J), j1 = Math.min(nb - 1, i + J);
+    for (j = j0; j <= j1; j++) {
+      var tr = this.lTri[j - i + J], vv = this.V[j], uu = this.U[j];
+      var toV1 = vv + this.lStay + tr, toV2 = uu + this.lSw + tr;
+      if (toV1 > bv) { bv = toV1; bvi = j; } if (toV2 > bv) { bv = toV2; bvi = nb + j; }
+      var toU1 = uu + this.lStay + tr, toU2 = vv + this.lSw + tr;
+      if (toU1 > bu) { bu = toU1; bui = nb + j; } if (toU2 > bu) { bu = toU2; bui = j; }
+    }
+    V2[i] = bv + lv; U2[i] = bu + lu; bpf[i] = bvi; bpf[nb + i] = bui;
+  }
+  for (i = 0; i < nb; i++) { if (V2[i] > best) best = V2[i]; if (U2[i] > best) best = U2[i]; }
+  for (i = 0; i < nb; i++) { V2[i] -= best; U2[i] -= best; }
+  this.V = V2; this.U = U2; this.started = true;
+  this.bp.push(bpf); this.cands.push(cands);
+  if (this.bp.length > this.lag + 1) { this.bp.shift(); this.cands.shift(); }
+  // best current state, then backtrack through the kept frames
+  var st = 0, bs = -Infinity;
+  for (i = 0; i < nb; i++) { if (V2[i] > bs) { bs = V2[i]; st = i; } if (U2[i] > bs) { bs = U2[i]; st = nb + i; } }
+  var path = new Array(this.bp.length);
+  for (var f = this.bp.length - 1; f >= 0; f--) { path[f] = st; st = this.bp[f][st]; }
+  var self = this;
+  return path.map(function (s, f) {
+    if (s >= nb) return null;
+    var cm = lo + s * res, bestc = null, bd = 1.5 * res;
+    self.cands[f].forEach(function (c) { var dd = Math.abs(c.m - cm); if (dd <= bd) { bd = dd; bestc = c; } });
+    return bestc ? bestc.m : cm;
+  });
+};
+PitchTracker.prototype.reset = function () { this.started = false; this.bp = []; this.cands = []; };
+
+// Held note for range finding: over the last holdMs, most frames are voiced and most voiced
+// frames sit within half a semitone of their median. Tolerates a few dropouts in vocal fry.
+function heldNote(win, now, holdMs) {
+  holdMs = holdMs || 500;
+  var w = win.filter(function (s) { return s.t >= now - holdMs; });
+  if (w.length < 8 || w[0].t > now - holdMs + 60) return null;
+  var raw = w.filter(function (s) { return s.m != null; }).map(function (s) { return s.m; });
+  if (raw.length < 0.7 * w.length) return null;
+  // light smoothing (median of 5 neighbouring frames, ~80 ms): fry jitters period to period,
+  // but the pitch you hear is the average
+  var v = raw.map(function (m, i) { return median(raw.slice(Math.max(0, i - 2), i + 3)); });
+  var med = median(v), near = v.filter(function (m) { return Math.abs(m - med) <= 0.5; });
+  return near.length >= 0.75 * v.length ? median(near) : null;
+}
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { pyinCandidates: pyinCandidates, PitchTracker: PitchTracker, yinDiff: yinDiff, pyinBand: pyinBand, voiceTypeLikelihood: voiceTypeLikelihood, yin: yin, rms: rms, f2m: f2m, m2f: m2f, noteName: noteName, scoreNote: scoreNote, heldNote: heldNote, guessVoiceType: guessVoiceType, median: median };
 
 // ---- App (browser only) ----
 (function () {
@@ -353,9 +520,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = { detectPi
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw { name: 'Unsupported' };
       var stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
       var src = c.createMediaStreamSource(stream);
-      var an = c.createAnalyser(); an.fftSize = 4096; /* ~85 ms: long enough to see C1 (32.7 Hz) */ src.connect(an);
+      var an = c.createAnalyser(); an.fftSize = 8192; /* ~170 ms buffer; the detector reads the newest ~120 ms */ src.connect(an);
       eng.src = src; eng.stream = stream; // keep the graph referenced
-      eng.an = an; eng.buf = new Float32Array(an.fftSize); eng.on = true; eng.trail = [];
+      eng.an = an; eng.buf = new Float32Array(an.fftSize); eng.on = true; eng.trail = []; eng.tracker = new PitchTracker();
       $('micDot').classList.add('on'); $('micLabel').textContent = 'Listening'; $('micBtn').hidden = true;
       $('tunerHint').textContent = 'Sing or hum any note. The line shows your pitch over the last 6 seconds; dashed lines are the notes of the scale.';
       requestAnimationFrame(loop);
@@ -375,18 +542,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = { detectPi
     if (!eng.on) return;
     var now = performance.now();
     eng.an.getFloatTimeDomainData(eng.buf);
-    var level = rms(eng.buf), m = null;
+    var sr = eng.ctx.sampleRate, win = eng.buf.subarray(eng.buf.length - Math.round(sr * 0.12));
+    var level = rms(win.subarray(win.length - Math.round(sr * 0.05)));
     $('lvl').style.width = Math.min(100, level * 600) + '%';
-    if (level > 0.006 && now > eng.muteUntil) {
-      var r = detectPitch(eng.buf, eng.ctx.sampleRate);
-      if (r) m = f2m(r.freq);
-    }
-    // 3-point median smoothing over recent voiced frames (kills single-frame octave blips)
-    if (m != null) {
-      eng.hist.push({ t: now, m: m }); eng.hist = eng.hist.filter(function (h) { return h.t > now - 90; }).slice(-3);
-      m = median(eng.hist.map(function (h) { return h.m; }));
-    } else eng.hist = [];
-    eng.trail.push({ t: now, m: m });
+    // pYIN candidates -> HMM tracker. The tracker returns its best path for the last few frames,
+    // so the newest part of the line can be corrected once more evidence has arrived.
+    var cands = level > 0.003 && now > eng.muteUntil ? pyinCandidates(win, sr) : [];
+    var path = eng.tracker.push(cands);
+    eng.trail.push({ t: now, m: null });
+    for (var k = 0; k < path.length && k < eng.trail.length; k++) eng.trail[eng.trail.length - path.length + k].m = path[k];
+    var m = path[path.length - 1];
     while (eng.trail.length && eng.trail[0].t < now - 8000) eng.trail.shift();
     eng.subs.forEach(function (fn) { fn(m, now); });
     render(now);
@@ -558,9 +723,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = { detectPi
   function capital(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
   function capture(ms) {
     return new Promise(function (res) {
-      var out = [], t0 = performance.now();
-      var fn = function (m, now) { out.push({ t: now, m: m }); if (now - t0 >= ms) { eng.subs = eng.subs.filter(function (f) { return f !== fn; }); res(out); } };
-      eng.subs.push(fn);
+      var t0 = performance.now();
+      // read the tracked line afterwards (not frame by frame) so late corrections count
+      setTimeout(function () { setTimeout(function () { res(eng.trail.filter(function (s) { return s.t >= t0 && s.t <= t0 + ms; })); }, 150); }, ms);
     });
   }
   function setPhase(p, len) {
@@ -604,7 +769,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = { detectPi
   var rng = { step: 'lo', lo: null, hi: null };
   eng.subs.push(function (m, now) {
     if (tab !== 'range' || rng.step === 'done') return;
-    var h = heldNote(eng.trail, now, 600);
+    var h = heldNote(eng.trail, now, 500);
     $('rNow').textContent = h != null ? noteName(h) : '–';
     if (h == null) return;
     if (rng.step === 'lo' && (rng.lo == null || h < rng.lo)) { rng.lo = h; setRangeUI(); }
@@ -670,15 +835,15 @@ if (typeof module !== 'undefined' && module.exports) module.exports = { detectPi
   // ---------- offline analysis (file + demo) ----------
   var fileTrace = null, fileName = '';
   async function analyze(x, sr, onProgress) {
-    var frame = sr > 30000 ? 4096 : 2048, hop = Math.round(sr * 0.02), out = [], peak = 0, n = Math.min(x.length, sr * 60);
-    for (var i = 0; i + frame < n; i += hop * 4) peak = Math.max(peak, rms(x.subarray(i, i + frame)));
-    var gate = Math.max(0.003, peak * 0.08), hist = [];
-    for (i = 0; i + frame < n; i += hop) {
-      var seg = x.subarray(i, i + frame), m = null;
-      if (rms(seg) > gate) { var r = detectPitch(seg, sr); if (r) m = f2m(r.freq); }
-      if (m != null) { hist.push(m); if (hist.length > 3) hist.shift(); m = median(hist); } else hist = [];
-      out.push({ t: i / sr * 1000, m: m });
-      if (out.length % 400 === 0) { onProgress && onProgress(i / n); await sleep(0); }
+    var buf = Math.round(sr * 0.12), hop = Math.round(sr / 60), out = [], peak = 0, n = Math.min(x.length, sr * 60), i;
+    for (i = buf; i <= n; i += hop * 4) peak = Math.max(peak, rms(x.subarray(i - Math.round(sr * 0.05), i)));
+    var gate = Math.max(0.002, peak * 0.05), tr = new PitchTracker();
+    for (i = buf; i <= n; i += hop) {
+      var seg = x.subarray(i - buf, i);
+      var path = tr.push(rms(seg.subarray(seg.length - Math.round(sr * 0.05))) > gate ? pyinCandidates(seg, sr) : []);
+      out.push({ t: i / sr * 1000, m: null });
+      for (var k = 0; k < path.length; k++) out[out.length - path.length + k].m = path[k];
+      if (out.length % 300 === 0) { onProgress && onProgress(i / n); await sleep(0); }
     }
     return out;
   }
